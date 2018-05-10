@@ -1,0 +1,32 @@
+Creating the keys and certigicates
+See tutorial: https://www.youtube.com/watch?v=zwnEmLx2LRs
+=========================================================
+
+Root key
+--------
+openssl genrsa -des3 -out root.key 1024  // Private key for root, pw=FunnyCrocodile
+openssl req -new -x509 -days 1826 -key root.key -out root.crt // Self-signed certificate
+
+
+CVNF
+----
+openssl genrsa -des3 -out cvnf.key 1024  // Private key for CVNF, pw=BlueFish
+openssl req -new -key cvnf.key -out cvnf.csr // Certificate signing request, challenge password=RedBigGreen
+openssl x509 -req -days 1826 -in cvnf.csr -CA root.crt -CAkey root.key -set_serial 01 -out cvnf.crt
+openssl pkcs12 -export -out cvnf.p12 -inkey cvnf.key -in cvnf.crt -chain -CAfile root.crt // pw=TooManyPasswords
+
+
+DVNF
+----
+openssl genrsa -des3 -out dvnf.key 1024  // Private key for DVNF, pw=MadCowBetaRelease
+openssl req -new -key dvnf.key -out dvnf.csr // Certificate signing request, challenge password=LiitleBigEndian
+openssl x509 -req -days 1826 -in dvnf.csr -CA root.crt -CAkey root.key -set_serial 01 -out dvnf.crt
+openssl pkcs12 -export -out dvnf.p12 -inkey dvnf.key -in dvnf.crt -chain -CAfile root.crt // pw=TrustMeOrDie
+
+
+CPE
+----
+openssl genrsa -out cpe.key 1024  // Private key for cpe, no password
+openssl req -new -key cpe.key -out cpe.csr // Certificate signing request, challenge password=LiitleBigEndian
+openssl x509 -req -days 1826 -in cpe.csr -CA root.crt -CAkey root.key -set_serial 02 -out cpe.crt
+openssl pkcs12 -export -out cpe.p12 -inkey cpe.key -in cpe.crt -chain -CAfile root.crt // pw=TrustMeOrDie

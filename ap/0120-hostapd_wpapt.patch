@@ -1,0 +1,162 @@
+diff --git a/hostapd/config_file.c b/hostapd/config_file.c
+index 5079f69..47359cf 100644
+--- a/hostapd/config_file.c
++++ b/hostapd/config_file.c
+@@ -2830,6 +2830,8 @@ static int hostapd_config_fill(struct hostapd_config *conf,
+ 		}
+ 	} else if (os_strcmp(buf, "use_driver_iface_addr") == 0) {
+ 		conf->use_driver_iface_addr = atoi(pos);
++	} else if (os_strcmp(buf, "wpa_pt") == 0) {
++		bss->wpapt = atoi(pos);
+ #ifdef CONFIG_IEEE80211W
+ 	} else if (os_strcmp(buf, "ieee80211w") == 0) {
+ 		bss->ieee80211w = atoi(pos);
+diff --git a/src/ap/ap_config.c b/src/ap/ap_config.c
+index 228de2b..e7862f9 100644
+--- a/src/ap/ap_config.c
++++ b/src/ap/ap_config.c
+@@ -93,8 +93,8 @@ void hostapd_config_defaults_bss(struct hostapd_bss_config *bss)
+ #endif /* CONFIG_IEEE80211R */
+ 
+ 	bss->radius_das_time_window = 300;
+-
+ 	bss->sae_anti_clogging_threshold = 5;
++	bss->wpapt = 0;
+ }
+ 
+ 
+diff --git a/src/ap/ap_config.h b/src/ap/ap_config.h
+index 8c8f7e2..12f69a1 100644
+--- a/src/ap/ap_config.h
++++ b/src/ap/ap_config.h
+@@ -595,6 +595,7 @@ struct hostapd_bss_config {
+ 
+ 	int ftm_responder;
+ 	int ftm_initiator;
++	int wpapt;         /* Nonzero if BSS in WPA Pass Through mode */
+ };
+ 
+ 
+diff --git a/src/ap/ap_drv_ops.h b/src/ap/ap_drv_ops.h
+index 0bb7954..5409005 100644
+--- a/src/ap/ap_drv_ops.h
++++ b/src/ap/ap_drv_ops.h
+@@ -157,6 +157,15 @@ static inline int hostapd_drv_get_inact_sec(struct hostapd_data *hapd,
+ 	return hapd->driver->get_inact_sec(hapd->drv_priv, addr);
+ }
+ 
++static inline int hostapd_drv_send_wpapt_config(struct hostapd_data *hapd)
++{
++	mtlk_wpapt_config_t wpapt_config;
++
++	memset (&wpapt_config, 0, sizeof(wpapt_config));
++	wpapt_config.enable = hapd->conf->wpapt;
++	return hapd->driver->send_wpapt_config(hapd->drv_priv, &wpapt_config);
++}
++
+ static inline int hostapd_drv_sta_remove(struct hostapd_data *hapd,
+ 					 const u8 *addr)
+ {
+diff --git a/src/ap/hostapd.c b/src/ap/hostapd.c
+index 9fafc7f..98a2096 100644
+--- a/src/ap/hostapd.c
++++ b/src/ap/hostapd.c
+@@ -956,6 +956,8 @@ static int hostapd_setup_bss(struct hostapd_data *hapd, int first)
+ 	if (conf->wmm_enabled < 0)
+ 		conf->wmm_enabled = hapd->iconf->ieee80211n;
+ 
++	hostapd_drv_send_wpapt_config(hapd); /* WPA Pass Through */
++
+ #ifdef CONFIG_IEEE80211R
+ 	if (is_zero_ether_addr(conf->r1_key_holder))
+ 		os_memcpy(conf->r1_key_holder, hapd->own_addr, ETH_ALEN);
+diff --git a/src/drivers/driver.h b/src/drivers/driver.h
+index a449cc9..ed21610 100644
+--- a/src/drivers/driver.h
++++ b/src/drivers/driver.h
+@@ -1587,6 +1587,11 @@ enum chan_width {
+ 	CHAN_WIDTH_UNKNOWN
+ };
+ 
++/* WPAPT (WPA Pass Through) settings */
++typedef struct mtlk_wpapt_config {
++  u8   enable;
++} __attribute__ ((packed)) mtlk_wpapt_config_t;
++
+ /**
+  * struct wpa_signal_info - Information about channel signal quality
+  */
+@@ -1734,6 +1739,12 @@ struct wpa_driver_ops {
+ 	/** One line description of the driver interface */
+ 	const char *desc;
+ 
++   	/**
++	* send_wpapt_config - WPA Pass Through configuration to Driver
++ 	* Returns: 0 on success, -1 on failure
++    	*/
++	int (*send_wpapt_config)(void *priv, mtlk_wpapt_config_t* atf_quotas);
++
+ 	/**
+ 	 * get_bssid - Get the current BSSID
+ 	 * @priv: private driver interface data
+diff --git a/src/drivers/driver_nl80211.c b/src/drivers/driver_nl80211.c
+index 1210d43..56be08d 100644
+--- a/src/drivers/driver_nl80211.c
++++ b/src/drivers/driver_nl80211.c
+@@ -9433,6 +9433,18 @@ static int nl80211_get_ext_capab(void *priv, enum wpa_driver_if_type type,
+ 	return 0;
+ }
+ 
++int nl80211_send_wpapt_config(void *priv, mtlk_wpapt_config_t* wpapt_config)
++{
++  int ret = nl80211_vendor_cmd(priv, OUI_LTQ, LTQ_NL80211_VENDOR_SUBCMD_WPAPT_SETTINGS,
++                 (u8*)wpapt_config, sizeof(mtlk_wpapt_config_t), NULL);
++
++  if (ret < 0)
++    wpa_printf(MSG_ERROR, "nl80211: sending WPA-PT configuration failed: %i (%s)",
++         ret, strerror(-ret));
++
++  return ret;
++}
++
+ 
+ const struct wpa_driver_ops wpa_driver_nl80211_ops = {
+ 	.name = "nl80211",
+@@ -9496,7 +9508,7 @@ const struct wpa_driver_ops wpa_driver_nl80211_ops = {
+ 	.send_frame = nl80211_send_frame,
+ 	.set_param = nl80211_set_param,
+ 	.get_radio_name = nl80211_get_radio_name,
+-	.add_pmkid = nl80211_add_pmkid,
++	.add_pmkid = nl80211_add_pmkid,src/drivers/driver_nl80211.c.rej
+ 	.remove_pmkid = nl80211_remove_pmkid,
+ 	.flush_pmkid = nl80211_flush_pmkid,
+ 	.set_rekey_info = nl80211_set_rekey_info,
+@@ -9513,7 +9525,7 @@ const struct wpa_driver_ops wpa_driver_nl80211_ops = {
+ 	.update_ft_ies = wpa_driver_nl80211_update_ft_ies,
+ 	.get_mac_addr = wpa_driver_nl80211_get_macaddr,
+ 	.get_survey = wpa_driver_nl80211_get_survey,
+-	.status = wpa_driver_nl80211_status,
++	.status = wpa_driver_nl80211_status,src/drivers/driver_nl80211.c.rej
+ 	.switch_channel = nl80211_switch_channel,
+ #ifdef ANDROID_P2P
+ 	.set_noa = wpa_driver_set_p2p_noa,
+@@ -9538,7 +9550,7 @@ const struct wpa_driver_ops wpa_driver_nl80211_ops = {
+ 	.br_delete_ip_neigh = wpa_driver_br_delete_ip_neigh,
+ 	.br_port_set_attr = wpa_driver_br_port_set_attr,
+ 	.br_set_net_param = wpa_driver_br_set_net_param,
+-	.add_tx_ts = nl80211_add_ts,
++	.add_tx_ts = nl80211_add_ts,src/drivers/driver_nl80211.c.rej
+ 	.del_tx_ts = nl80211_del_ts,
+ 	.get_ifindex = nl80211_get_ifindex,
+ #ifdef CONFIG_DRIVER_NL80211_QCA
+@@ -9549,8 +9561,9 @@ const struct wpa_driver_ops wpa_driver_nl80211_ops = {
+ 	.set_prob_oper_freq = nl80211_set_prob_oper_freq,
+ 	.p2p_lo_start = nl80211_p2p_lo_start,
+ 	.p2p_lo_stop = nl80211_p2p_lo_stop,
+-	.set_default_scan_ies = nl80211_set_default_scan_ies,
++	.set_default_scan_ies = nl80211_set_default_scan_ies,srcsrc/drivers/driver_nl80211.c.rej/drivers/driver_nl80211.c.rej
+ #endif /* CONFIG_DRIVER_NL80211_QCA */
+ 	.configure_data_frame_filters = nl80211_configure_data_frame_filters,
+ 	.get_ext_capab = nl80211_get_ext_capab,
++	.send_wpapt_config = nl80211_send_wpapt_config,
+ };

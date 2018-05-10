@@ -1,0 +1,49 @@
+diff --git a/src/ap/hostapd.c b/src/ap/hostapd.c
+index 98a2096..c2af513 100644
+--- a/src/ap/hostapd.c
++++ b/src/ap/hostapd.c
+@@ -2828,13 +2828,15 @@ void hostapd_new_assoc_sta(struct hostapd_data *hapd, struct sta_info *sta,
+ 	}
+ 
+ 	/* Start IEEE 802.1X authentication process for new stations */
+-	ieee802_1x_new_station(hapd, sta);
+-	if (reassoc) {
+-		if (sta->auth_alg != WLAN_AUTH_FT &&
+-		    !(sta->flags & (WLAN_STA_WPS | WLAN_STA_MAYBE_WPS)))
+-			wpa_auth_sm_event(sta->wpa_sm, WPA_REAUTH);
+-	} else
+-		wpa_auth_sta_associated(hapd->wpa_auth, sta->wpa_sm);
++	if (!hapd->conf->wpapt) {
++		ieee802_1x_new_station(hapd, sta);
++		if (reassoc) {
++			if (sta->auth_alg != WLAN_AUTH_FT &&
++				!(sta->flags & (WLAN_STA_WPS | WLAN_STA_MAYBE_WPS)))
++				wpa_auth_sm_event(sta->wpa_sm, WPA_REAUTH);
++		} else
++			wpa_auth_sta_associated(hapd->wpa_auth, sta->wpa_sm);
++	}
+ 
+ 	if (!(hapd->iface->drv_flags & WPA_DRIVER_FLAGS_INACTIVITY_TIMER)) {
+ 		wpa_printf(MSG_DEBUG,
+diff --git a/src/ap/ieee802_11.c b/src/ap/ieee802_11.c
+index 4e04169..9d7c7a8 100644
+--- a/src/ap/ieee802_11.c
++++ b/src/ap/ieee802_11.c
+@@ -2874,6 +2874,17 @@ static void handle_assoc_cb(struct hostapd_data *hapd,
+ 			hostapd_set_wds_encryption(hapd, sta, ifname_wds);
+ 	}
+ 
++	/* for WPA2 direct mode do not start EAPOL state machine,
++	 * but just keep .11x port closed */
++	if (hapd->conf->wpapt) {
++		hostapd_set_sta_flags(hapd, sta);
++		hapd->new_assoc_sta_cb(hapd, sta, !new_assoc);
++		hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
++		               HOSTAPD_LEVEL_INFO, "WPAPT: STA " MACSTR " connected",
++					   MAC2STR(sta->addr));
++		return;
++	}
++
+ 	if (sta->eapol_sm == NULL) {
+ 		/*
+ 		 * This STA does not use RADIUS server for EAP authentication,

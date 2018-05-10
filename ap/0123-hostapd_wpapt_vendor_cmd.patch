@@ -1,0 +1,18 @@
+diff --git a/src/drivers/driver_nl80211.c b/src/drivers/driver_nl80211.c
+index 56be08d..14d2d71 100644
+--- a/src/drivers/driver_nl80211.c
++++ b/src/drivers/driver_nl80211.c
+@@ -9435,7 +9435,12 @@ static int nl80211_get_ext_capab(void *priv, enum wpa_driver_if_type type,
+ 
+ int nl80211_send_wpapt_config(void *priv, mtlk_wpapt_config_t* wpapt_config)
+ {
+-  int ret = nl80211_vendor_cmd(priv, OUI_LTQ, LTQ_NL80211_VENDOR_SUBCMD_WPAPT_SETTINGS,
++/* WPA Pass Through settings */
++#define NL80211_VENDOR_SUBCMD_WPAPT_SETTINGS  WPAPT SUBCMD NUMBER 
++/* Vendor number */
++#define OUI    VENDOR NUMBER        
++
++  int ret = nl80211_vendor_cmd(priv, OUI, NL80211_VENDOR_SUBCMD_WPAPT_SETTINGS,
+                  (u8*)wpapt_config, sizeof(mtlk_wpapt_config_t), NULL);
+ 
+   if (ret < 0)

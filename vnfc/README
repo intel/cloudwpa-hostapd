@@ -1,0 +1,56 @@
+========================================================================
+README for Intel(R) hostapd patch Package
+
+February 2018
+========================================================================
+
+
+Contents
+========
+
+Contains patch for hostapd v2.6 for work on VNF server
+
+Overview
+========
+
+This is modification of hostapd for remote control and provide WiFi access point.
+Used specific driver - wpapt_vnf
+
+Configuration
+=============
+
+Configuration like are configuration of standard hostapd daemon
+Most important option is are
+
+bssid='YOUR BSSID LIKE ARE ON AP'
+and
+ssid='YOUR SSID LIKE ARE ON AP'
+
+Enother configuration parameters must be equal AP hostapd configuration
+In current configuration we use WPA2-enterprise and freeRadius for authentification
+EAP-TTLS and MSCHAPv2 for inner authentication
+
+How to build
+============
+
+cd hostapd-2.6
+patch -p1 < 001_hostapd.patch
+cd hostapd
+make
+
+How to run
+==========
+
+./hostapd wpapt.conf
+
+Legal Disclaimer
+================
+
+THIS SOFTWARE IS PROVIDED BY INTEL"AS IS". NO LICENSE, EXPRESS OR
+IMPLIED, BY ESTOPPEL OR OTHERWISE, TO ANY INTELLECTUAL PROPERTY RIGHTS
+ARE GRANTED THROUGH USE. EXCEPT AS PROVIDED IN INTEL'S TERMS AND
+CONDITIONS OF SALE, INTEL ASSUMES NO LIABILITY WHATSOEVER AND INTEL
+DISCLAIMS ANY EXPRESS OR IMPLIED WARRANTY, RELATING TO SALE AND/OR
+USE OF INTEL PRODUCTS INCLUDING LIABILITY OR WARRANTIES RELATING TO
+FITNESS FOR A PARTICULAR PURPOSE, MERCHANTABILITY, OR INFRINGEMENT
+OF ANY PATENT, COPYRIGHT OR OTHER INTELLECTUAL PROPERTY RIGHT.

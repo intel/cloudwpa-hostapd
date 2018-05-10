@@ -1,0 +1,14 @@
+diff --git a/hostapd/defconfig b/hostapd/defconfig
+index 4659dd1..74f3193 100644
+--- a/hostapd/defconfig
++++ b/hostapd/defconfig
+@@ -331,7 +331,8 @@ CONFIG_IPV6=y
+ # For more details refer to:
+ # http://wireless.kernel.org/en/users/Documentation/acs
+ #
+-#CONFIG_ACS=y
++CONFIG_ACS=y
++CONFIG_WPAPT=y
+ 
+ # Multiband Operation support
+ # These extentions facilitate efficient use of multiple frequency bands

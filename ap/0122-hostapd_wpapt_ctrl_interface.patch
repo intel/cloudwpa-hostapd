@@ -1,0 +1,1676 @@
+diff --git a/hostapd/Makefile b/hostapd/Makefile
+index 46dffe5..37ba382 100644
+--- a/hostapd/Makefile
++++ b/hostapd/Makefile
+@@ -86,6 +86,8 @@ OBJS += ../src/ap/beacon.o
+ OBJS += ../src/ap/bss_load.o
+ OBJS += ../src/ap/neighbor_db.o
+ OBJS += ../src/ap/rrm.o
++OBJS += ../src/common/wpapt_tls.o
++OBJS += ../src/ap/wpapt_cci_clnt.o
+ 
+ OBJS_c = hostapd_cli.o
+ OBJS_c += ../src/common/wpa_ctrl.o
+@@ -1012,6 +1014,10 @@ OBJS += ../src/fst/fst_ctrl_iface.o
+ endif
+ endif
+ 
++ifdef CONFIG_WPAPT
++CFLAGS += -DCONFIG_WPAPT
++endif
++
+ ALL=hostapd hostapd_cli
+ 
+ all: verify_config $(ALL)
+diff --git a/hostapd/config_file.c b/hostapd/config_file.c
+index 47359cf..ca48162 100644
+--- a/hostapd/config_file.c
++++ b/hostapd/config_file.c
+@@ -2830,8 +2830,20 @@ static int hostapd_config_fill(struct hostapd_config *conf,
+ 		}
+ 	} else if (os_strcmp(buf, "use_driver_iface_addr") == 0) {
+ 		conf->use_driver_iface_addr = atoi(pos);
+-	} else if (os_strcmp(buf, "wpa_pt") == 0) {
++	} else if (os_strcmp(buf, "wpa_pt") == 0 || os_strcmp(buf, "wpapt") == 0) {
+ 		bss->wpapt = atoi(pos);
++	} else if (os_strcmp(buf, "wpapt_cvnf") == 0) {
++		os_free(bss->wpapt_cvnf);
++		bss->wpapt_cvnf = os_strdup(pos);
++	} else if (os_strcmp(buf, "wpapt_cpe_crt") == 0) {
++		os_free(bss->wpapt_cpe_crt);
++		bss->wpapt_cpe_crt = os_strdup(pos);
++	} else if (os_strcmp(buf, "wpapt_cpe_key") == 0) {
++		os_free(bss->wpapt_cpe_key);
++		bss->wpapt_cpe_key = os_strdup(pos);
++	} else if (os_strcmp(buf, "wpapt_root_crt") == 0) {
++		os_free(bss->wpapt_root_crt);
++		bss->wpapt_root_crt = os_strdup(pos);
+ #ifdef CONFIG_IEEE80211W
+ 	} else if (os_strcmp(buf, "ieee80211w") == 0) {
+ 		bss->ieee80211w = atoi(pos);
+diff --git a/src/ap/Makefile b/src/ap/Makefile
+index 98788fe..2f769c6 100644
+--- a/src/ap/Makefile
++++ b/src/ap/Makefile
+@@ -59,7 +59,9 @@ LIB_OBJS= \
+ 	wpa_auth_glue.o \
+ 	wpa_auth_ie.o \
+ 	wps_hostapd.o \
+-	x_snoop.o
++	x_snoop.o \
++        atf.o \
++        wpapt_cci_clnt.o
+ 
+ libap.a: $(LIB_OBJS)
+ 	$(AR) crT $@ $?
+diff --git a/src/ap/ap_config.c b/src/ap/ap_config.c
+index e7862f9..cfda32d 100644
+--- a/src/ap/ap_config.c
++++ b/src/ap/ap_config.c
+@@ -582,6 +582,11 @@ void hostapd_config_free_bss(struct hostapd_bss_config *conf)
+ 	os_free(conf->no_probe_resp_if_seen_on);
+ 	os_free(conf->no_auth_if_seen_on);
+ 
++	os_free(conf->wpapt_cvnf);
++	os_free(conf->wpapt_cpe_crt);
++	os_free(conf->wpapt_cpe_key);
++	os_free(conf->wpapt_root_crt);
++
+ 	os_free(conf);
+ }
+ 
+diff --git a/src/ap/ap_config.h b/src/ap/ap_config.h
+index 12f69a1..69e922f 100644
+--- a/src/ap/ap_config.h
++++ b/src/ap/ap_config.h
+@@ -595,7 +595,12 @@ struct hostapd_bss_config {
+ 
+ 	int ftm_responder;
+ 	int ftm_initiator;
+-	int wpapt;         /* Nonzero if BSS in WPA Pass Through mode */
++
++	int   wpapt;           /* Nonzero if BSS in WPA Pass Through mode */
++	char  *wpapt_cvnf;     /* IP address and TCP port to connect to CVNF */
++	char  *wpapt_cpe_crt;  /* Path to own certificate file for TLS */
++	char  *wpapt_cpe_key;  /* Path to own private key file for TLS */
++	char  *wpapt_root_crt; /* Path to root certificate file for TLS */
+ };
+ 
+ 
+diff --git a/src/ap/ap_drv_ops.c b/src/ap/ap_drv_ops.c
+index f139465..f860d41 100644
+--- a/src/ap/ap_drv_ops.c
++++ b/src/ap/ap_drv_ops.c
+@@ -258,7 +258,7 @@ int hostapd_set_sta_flags(struct hostapd_data *hapd, struct sta_info *sta)
+ 	total_flags = hostapd_sta_flags_to_drv(sta->flags);
+ 	set_flags = WPA_STA_SHORT_PREAMBLE | WPA_STA_WMM | WPA_STA_MFP;
+ 	if (((!hapd->conf->ieee802_1x && !hapd->conf->wpa) ||
+-	     sta->auth_alg == WLAN_AUTH_FT) &&
++	     sta->auth_alg == WLAN_AUTH_FT || hapd->conf->wpapt) &&
+ 	    sta->flags & WLAN_STA_AUTHORIZED)
+ 		set_flags |= WPA_STA_AUTHORIZED;
+ 	flags_or = total_flags & set_flags;
+diff --git a/src/ap/hostapd.c b/src/ap/hostapd.c
+index c2af513..5d76c3d 100644
+--- a/src/ap/hostapd.c
++++ b/src/ap/hostapd.c
+@@ -45,6 +45,7 @@
+ #include "ndisc_snoop.h"
+ #include "neighbor_db.h"
+ #include "rrm.h"
++#include "wpapt_cci_clnt.h"
+ 
+ 
+ static int hostapd_flush_old_stations(struct hostapd_data *hapd, u16 reason);
+@@ -341,6 +342,7 @@ static void hostapd_free_hapd_data(struct hostapd_data *hapd)
+ #endif /* CONFIG_MESH */
+ 
+ 	hostapd_clean_rrm(hapd);
++	wpapt_cci_clean(hapd);
+ }
+ 
+ 
+@@ -1138,6 +1140,10 @@ static int hostapd_setup_bss(struct hostapd_data *hapd, int first)
+ 	if (hapd->wpa_auth && wpa_init_keys(hapd->wpa_auth) < 0)
+ 		return -1;
+ 
++	/* WPA Pass Through: init connection to CVNF */
++	if (hapd->conf->wpapt && wpapt_cci_init(hapd) != 0)
++		return -1;
++
+ 	if (hapd->driver && hapd->driver->set_operstate)
+ 		hapd->driver->set_operstate(hapd->drv_priv, 1);
+ 
+@@ -2828,7 +2834,19 @@ void hostapd_new_assoc_sta(struct hostapd_data *hapd, struct sta_info *sta,
+ 	}
+ 
+ 	/* Start IEEE 802.1X authentication process for new stations */
+-	if (!hapd->conf->wpapt) {
++	if (hapd->conf->wpapt && sta->wpa_sm != NULL) {
++		const u8* rsn_ie;
++		int       rsn_ie_len;
++
++		wpa_auth_get_rsn_ie(sta->wpa_sm, &rsn_ie, &rsn_ie_len);
++		if (rsn_ie == 0 || rsn_ie_len <= 0) {
++			hostapd_drv_sta_deauth(hapd, sta->addr, WLAN_REASON_UNSPECIFIED);
++			return;
++		}
++
++		wpapt_cci_send_sta_add(hapd, sta->addr, reassoc, rsn_ie, rsn_ie_len);
++	}
++	else {
+ 		ieee802_1x_new_station(hapd, sta);
+ 		if (reassoc) {
+ 			if (sta->auth_alg != WLAN_AUTH_FT &&
+diff --git a/src/ap/hostapd.h b/src/ap/hostapd.h
+index dec46f6..f13a15b 100644
+--- a/src/ap/hostapd.h
++++ b/src/ap/hostapd.h
+@@ -304,6 +304,8 @@ struct hostapd_data {
+ 	u8 range_req_token;
+ 	unsigned int lci_req_active:1;
+ 	unsigned int range_req_active:1;
++
++	struct wpapt_cci_connection *wpapt_cci; // CPE to CVNF interface
+ };
+ 
+ 
+diff --git a/src/ap/ieee802_1x.c b/src/ap/ieee802_1x.c
+index 80ff996..44265f3 100644
+--- a/src/ap/ieee802_1x.c
++++ b/src/ap/ieee802_1x.c
+@@ -904,6 +904,9 @@ void ieee802_1x_receive(struct hostapd_data *hapd, const u8 *sa, const u8 *buf,
+ 	struct rsn_pmksa_cache_entry *pmksa;
+ 	int key_mgmt;
+ 
++	if (hapd->conf->wpapt)
++		return;
++
+ 	if (!hapd->conf->ieee802_1x && !hapd->conf->wpa && !hapd->conf->osen &&
+ 	    !hapd->conf->wps_state)
+ 		return;
+diff --git a/src/ap/sta_info.c b/src/ap/sta_info.c
+index f12d408..7d2737d 100644
+--- a/src/ap/sta_info.c
++++ b/src/ap/sta_info.c
+@@ -36,6 +36,7 @@
+ #include "ndisc_snoop.h"
+ #include "sta_info.h"
+ #include "vlan.h"
++#include "wpapt_cci_clnt.h"
+ 
+ static void ap_sta_remove_in_other_bss(struct hostapd_data *hapd,
+ 				       struct sta_info *sta);
+@@ -179,6 +180,9 @@ void ap_free_sta(struct hostapd_data *hapd, struct sta_info *sta)
+ 	ap_sta_hash_del(hapd, sta);
+ 	ap_sta_list_del(hapd, sta);
+ 
++        if (hapd->conf->wpapt && (sta->flags & WLAN_STA_WPAPT_RM_BY_PEER_RQ) == 0)
++               wpapt_cci_send_sta_remove(hapd, sta->addr);
++
+ 	if (sta->aid > 0)
+ 		hapd->sta_aid[(sta->aid - 1) / 32] &=
+ 			~BIT((sta->aid - 1) % 32);
+diff --git a/src/ap/sta_info.h b/src/ap/sta_info.h
+index 099de62..9ab9d73 100644
+--- a/src/ap/sta_info.h
++++ b/src/ap/sta_info.h
+@@ -38,6 +38,7 @@
+ #define WLAN_STA_WNM_SLEEP_MODE BIT(19)
+ #define WLAN_STA_VHT_OPMODE_ENABLED BIT(20)
+ #define WLAN_STA_VENDOR_VHT BIT(21)
++#define WLAN_STA_WPAPT_RM_BY_PEER_RQ BIT(22)
+ #define WLAN_STA_PENDING_DISASSOC_CB BIT(29)
+ #define WLAN_STA_PENDING_DEAUTH_CB BIT(30)
+ #define WLAN_STA_NONERP BIT(31)
+diff --git a/src/ap/wpa_auth.c b/src/ap/wpa_auth.c
+index 3587086..51e4f1a 100644
+--- a/src/ap/wpa_auth.c
++++ b/src/ap/wpa_auth.c
+@@ -3663,6 +3663,15 @@ int wpa_auth_get_ip_addr(struct wpa_state_machine *sm, u8 *addr)
+ #endif /* CONFIG_P2P */
+ 
+ 
++/* Return sta->wpa_sm->wpa_ie (to transfer it to CVNF in the WPAPT mode). */
++void wpa_auth_get_rsn_ie(struct wpa_state_machine *sm, const u8 **buf,
++		                 int *len)
++{
++	*len = sm->wpa_ie_len;
++	*buf = sm->wpa_ie;
++}
++
++
+ int wpa_auth_radius_das_disconnect_pmksa(struct wpa_authenticator *wpa_auth,
+ 					 struct radius_das_attrs *attr)
+ {
+diff --git a/src/ap/wpa_auth.h b/src/ap/wpa_auth.h
+index 0de8d97..8c4da60 100644
+--- a/src/ap/wpa_auth.h
++++ b/src/ap/wpa_auth.h
+@@ -338,6 +338,8 @@ int wpa_auth_uses_sae(struct wpa_state_machine *sm);
+ int wpa_auth_uses_ft_sae(struct wpa_state_machine *sm);
+ 
+ int wpa_auth_get_ip_addr(struct wpa_state_machine *sm, u8 *addr);
++void wpa_auth_get_rsn_ie(struct wpa_state_machine *sm, const u8 **buf,
++		int *len);
+ 
+ struct radius_das_attrs;
+ int wpa_auth_radius_das_disconnect_pmksa(struct wpa_authenticator *wpa_auth,
+diff --git a/src/ap/wpapt_cci_clnt.c b/src/ap/wpapt_cci_clnt.c
+new file mode 100644
+index 0000000..0b24028
+--- /dev/null
++++ b/src/ap/wpapt_cci_clnt.c
+@@ -0,0 +1,322 @@
++/*
++ *   BSD LICENSE
++ * 
++ *   Copyright(c) 2007-2017 Intel Corporation. All rights reserved.
++ *   All rights reserved.
++ * 
++ *   Redistribution and use in source and binary forms, with or without 
++ *   modification, are permitted provided that the following conditions 
++ *   are met:
++ * 
++ *     * Redistributions of source code must retain the above copyright 
++ *       notice, this list of conditions and the following disclaimer.
++ *     * Redistributions in binary form must reproduce the above copyright 
++ *       notice, this list of conditions and the following disclaimer in 
++ *       the documentation and/or other materials provided with the 
++ *       distribution.
++ *     * Neither the name of Intel Corporation nor the names of its 
++ *       contributors may be used to endorse or promote products derived 
++ *       from this software without specific prior written permission.
++ * 
++ *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 
++ *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
++ *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
++ *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT 
++ *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
++ *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
++ *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, 
++ *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY 
++ *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
++ *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
++ *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ * 
++ *  wpapt_cci_clnt.c: Implementation of CCI (CVNF to CPE Interface) client
++ * ======================================================================== */
++
++#include "includes.h"
++#include "common.h"
++#include "drivers/driver.h"
++#include "hostapd.h"
++#include "ap_drv_ops.h"
++#include "sta_info.h"
++#include "common/wpapt_tls.h"
++#include "wpapt_cci_clnt.h"
++#include "wpapt_cci_msgs.h"
++
++
++/* Private data associated with CCI connection */
++struct wpapt_cci_connection {
++	struct wpapt_tls_peer *cvnf; /* Connection handle */
++	struct hostapd_data   *hapd; /* To dispatch messages from CVNF */
++};
++
++
++/*                           Sending messages to CVNF
++ * ==========================================================================*/
++
++/* Send WPAPT_CCI_MSG_INIT to CVNF */
++static void wpapt_cci_send_init(struct hostapd_data *hapd)
++{
++	struct wpapt_cci_msg_init msg;
++	const char *own_id = "hostapd/CPE " __DATE__ " " __TIME__;
++
++	if (hapd->wpapt_cci->cvnf != NULL) {
++		memset(&msg, 0, sizeof(msg));
++		msg.prot_version = host_to_le16(WPAPT_CCI_VERSION);
++		msg.peer_version = host_to_le32(0x01000001); /* 1.0.0.1 */
++		msg.peer_id_len = host_to_le16(strlen(own_id));
++		wpapt_tls_init_msg(hapd->wpapt_cci->cvnf, WPAPT_CCI_MSG_INIT);
++		wpapt_tls_put_data(hapd->wpapt_cci->cvnf, &msg, sizeof(msg));
++		wpapt_tls_put_data(hapd->wpapt_cci->cvnf, own_id, strlen(own_id));
++		wpapt_tls_send_msg(hapd->wpapt_cci->cvnf);
++	}
++}
++
++
++/* Send WPAPT_CCI_MSG_BSS_INFO to CVNF */
++static void wpapt_cci_send_bss_info(struct hostapd_data *hapd)
++{
++	struct wpapt_cci_msg_bss_info msg;
++
++	if (hapd->wpapt_cci->cvnf != NULL) {
++		memset(&msg, 0, sizeof(msg));
++		memcpy(msg.bssid, hapd->conf->bssid, ETH_ALEN);
++		memcpy(msg.essid, hapd->conf->ssid.ssid, SSID_MAX_LEN);
++		wpapt_tls_init_msg(hapd->wpapt_cci->cvnf, WPAPT_CCI_MSG_BSS_INFO);
++		wpapt_tls_put_data(hapd->wpapt_cci->cvnf, &msg, sizeof(msg));
++		wpapt_tls_send_msg(hapd->wpapt_cci->cvnf);
++	}
++}
++
++
++/* Send WPAPT_CCI_MSG_STA_ADD to CVNF */
++void wpapt_cci_send_sta_add(struct hostapd_data *hapd, const uint8_t *sta_addr,
++		int reassoc, const uint8_t *rsn_ie, int rsn_ie_len)
++{
++	struct wpapt_cci_msg_sta_add msg;
++
++	if (hapd->wpapt_cci->cvnf != NULL) {
++		memset(&msg, 0, sizeof(msg));
++		memcpy(msg.sta_addr, sta_addr, ETH_ALEN);
++		msg.reassoc = (reassoc == 0) ? 0 : 1;
++		msg.rsn_ie_len = host_to_le16(rsn_ie_len);
++		wpapt_tls_init_msg(hapd->wpapt_cci->cvnf, WPAPT_CCI_MSG_STA_ADD);
++		wpapt_tls_put_data(hapd->wpapt_cci->cvnf, &msg, sizeof(msg));
++		wpapt_tls_put_data(hapd->wpapt_cci->cvnf, rsn_ie, rsn_ie_len);
++		wpapt_tls_send_msg(hapd->wpapt_cci->cvnf);
++	}
++}
++
++
++/* Send WPAPT_CCI_MSG_STA_REMOVE to CVNF */
++void wpapt_cci_send_sta_remove(struct hostapd_data *hapd,
++		const uint8_t *sta_addr)
++{
++	struct wpapt_cci_msg_sta_remove msg;
++
++	if (hapd->wpapt_cci->cvnf != NULL) {
++		memset(&msg, 0, sizeof(msg));
++		memcpy(msg.sta_addr, sta_addr, ETH_ALEN);
++		wpapt_tls_init_msg(hapd->wpapt_cci->cvnf, WPAPT_CCI_MSG_STA_REMOVE);
++		wpapt_tls_put_data(hapd->wpapt_cci->cvnf, &msg, sizeof(msg));
++		wpapt_tls_send_msg(hapd->wpapt_cci->cvnf);
++	}
++}
++
++
++/*                        Dispatching messages from CVNF
++ * ==========================================================================*/
++
++static void wpapt_cci_dispatch_init(struct hostapd_data *hapd,
++		struct wpapt_cci_msg_init *msg, char *peer_id)
++{
++	uint32_t peer_ver = le_to_host32(msg->peer_version);
++	wpa_printf(MSG_INFO, "WPAPT: Connected to CVNF, BSS='%s', "
++			"prot_version=%d, peer_version=%d.%d.%d.%d, id='%s'",
++			hapd->conf->ssid.ssid, le_to_host16(msg->prot_version),
++			peer_ver >> 24, (peer_ver >> 16) & 255,
++			(peer_ver >> 8) & 255, peer_ver & 255, peer_id);
++}
++
++
++static void wpapt_cci_dispatch_sta_remove(struct hostapd_data *hapd,
++		struct wpapt_cci_msg_sta_remove *msg)
++{
++	/* Find the station to remove */
++	struct sta_info *sta = ap_get_sta(hapd, msg->sta_addr);
++	if (sta == NULL) {
++		wpa_printf(MSG_DEBUG, "CTRL_IFACE WPAPT_STA_REMOVE: STA " MACSTR
++			" doesn't present in BSS " MACSTR, MAC2STR(msg->sta_addr),
++			MAC2STR(hapd->conf->bssid));
++	}
++	else {
++		/* Remove the STA from BSS */
++		sta->flags |= WLAN_STA_WPAPT_RM_BY_PEER_RQ;
++		ap_sta_disconnect(hapd, sta, sta->addr, WLAN_REASON_UNSPECIFIED);
++		ap_free_sta(hapd, sta);
++	}
++}
++
++
++static void wpapt_cci_dispatch_1x_filter(struct hostapd_data *hapd,
++		struct wpapt_cci_msg_1x_filter *msg)
++{
++	/* Find the station referenced in the command */
++	struct sta_info *sta = ap_get_sta(hapd, msg->sta_addr);
++	if (sta == NULL) {
++		wpa_printf(MSG_DEBUG, "CTRL_IFACE WPAPT_1X_FILTER: STA " MACSTR
++			"doesn't present in BSS " MACSTR, MAC2STR(msg->sta_addr),
++			MAC2STR(hapd->conf->bssid));
++	}
++	else {
++		/* Set the 1X filter to open or closed */
++		ap_sta_set_authorized(hapd, sta, msg->open_filter);
++		hostapd_set_sta_flags(hapd, sta);
++	}
++}
++
++
++static void on_msg(uint16_t msg_id, uint16_t msg_len, void* ctx)
++{
++	struct wpapt_cci_connection* conn = ctx;
++	struct hostapd_data *hapd = conn->hapd;
++
++	switch(msg_id) {
++	case WPAPT_CCI_MSG_INIT: {
++			struct wpapt_cci_msg_init msg;
++			int   len;
++			char* peer_id;
++			wpapt_tls_get_data(hapd->wpapt_cci->cvnf, &msg, sizeof(msg));
++			len = le_to_host16(msg.peer_id_len);
++			peer_id = wpapt_tls_get_sz(hapd->wpapt_cci->cvnf, len);
++			wpapt_cci_dispatch_init(hapd, &msg, peer_id);
++			os_free(peer_id);
++			break;
++		}
++
++	case WPAPT_CCI_MSG_STA_REMOVE: {
++			struct wpapt_cci_msg_sta_remove msg;
++			wpapt_tls_get_data(hapd->wpapt_cci->cvnf, &msg, sizeof(msg));
++			wpapt_cci_dispatch_sta_remove(hapd, &msg);
++			break;
++		}
++
++	case WPAPT_CCI_MSG_1X_FILTER: {
++			struct wpapt_cci_msg_1x_filter msg;
++			wpapt_tls_get_data(hapd->wpapt_cci->cvnf, &msg, sizeof(msg));
++			wpapt_cci_dispatch_1x_filter(hapd, &msg);
++			break;
++		}
++
++	default:
++		wpa_printf(MSG_ERROR, "WPAPT: Unknown CVNF message: BSS=%s, id=%d, len=%d",
++				hapd->conf->ssid.ssid, msg_id, msg_len);
++	}
++}
++
++
++/*                    Connecting/disconnecting to/from CVNF
++ * ==========================================================================*/
++
++/* This function is invoked when:
++ * 1. TLS connection to CVNF got closed (CVNF went down or a network error).
++ * 2. BSS is put down on hostapd/CPE initiative.
++ */
++static void on_disconnect(void* ctx)
++{
++	struct wpapt_cci_connection* conn = ctx;
++	struct hostapd_data *hapd = conn->hapd;
++	wpa_printf(MSG_DEBUG, "WPAPT: on_disconnect, BSS=%s",
++			hapd->conf->ssid.ssid);
++
++	os_free(conn);
++	hapd->wpapt_cci = NULL;
++}
++
++
++int wpapt_cci_init(struct hostapd_data *hapd)
++{
++	static int one_time_init;
++	char   *cvnf_host, *cvnf_port_str;
++	int    cvnf_port = 0;
++
++	if (!one_time_init) /* To protect against several WPAPT BSSes */
++		wpapt_tls_init();
++	one_time_init = 1;
++
++	/* Check WPAPT configuration validity */
++	if (hapd->conf->wpapt_cvnf == NULL ||
++		hapd->conf->wpapt_cpe_crt == NULL ||
++		hapd->conf->wpapt_cpe_key == NULL ||
++		hapd->conf->wpapt_root_crt == NULL) {
++		wpa_printf(MSG_ERROR, "WPAPT: BSS configuration lacks one of the "
++				"following settings: 'wpapt_cvnf=...', 'wpapt_cpe_crt=...', "
++				"'wpapt_cpe_key=...' or 'wpapt_root_crt=...'.");
++		return -1;
++	}
++
++	/* Parse 'wpapt_cvnf=...' as 'host:port' string */
++	cvnf_host = os_strdup(hapd->conf->wpapt_cvnf);
++	cvnf_port_str = (cvnf_host == NULL) ? NULL : os_strchr(cvnf_host, ':');
++	if (cvnf_port_str != NULL) {
++		*cvnf_port_str = '\0'; /* replace ':' with '\0' */
++		cvnf_port = atoi(cvnf_port_str + 1);
++	}
++	if (cvnf_port == 0) {
++		wpa_printf(MSG_ERROR, "WPAPT: Cannot parse wpapt_cvnf=%s as "
++				"as <host>:<port>", hapd->conf->wpapt_cvnf);
++		os_free(cvnf_host);
++		return -1;
++	}
++
++	/* Resolve CVNF host string to an IP address */
++	struct wpapt_tls_clnt_config cfg;
++	memset (&cfg, 0, sizeof(cfg));
++	if (inet_aton(cvnf_host, &cfg.srv_addr) == 0) {
++		wpa_printf(MSG_ERROR, "WPAPT: Cannot resolve CVNF address %s", cvnf_host);
++		os_free(cvnf_host);
++		return -1;
++	}
++	os_free(cvnf_host); /* no longer needed */
++
++	/* Prepare CVNF client configuration */
++	cfg.bind_addr.s_addr = INADDR_ANY;
++	cfg.port = cvnf_port;
++	cfg.msg_hdr_magic = WPAPT_CCI_MAGIC;
++	cfg.clnt_crt_file = hapd->conf->wpapt_cpe_crt;
++	cfg.clnt_key_file = hapd->conf->wpapt_cpe_key;
++	cfg.root_crt_file = hapd->conf->wpapt_root_crt;
++	cfg.on_msg_cb = on_msg;
++	cfg.on_disconnect_cb = on_disconnect;
++
++	/* Connect to CVNF */
++	hapd->wpapt_cci = os_zalloc(sizeof(struct wpapt_cci_connection));
++	if (hapd->wpapt_cci == NULL)
++		return -1;
++	hapd->wpapt_cci->hapd = hapd;
++	hapd->wpapt_cci->cvnf = wpapt_tls_connect(&cfg, hapd->wpapt_cci);
++
++	/* Initial handshake with CVNF server */
++	if (hapd->wpapt_cci->cvnf != NULL) {
++		wpapt_cci_send_init(hapd);
++		wpapt_cci_send_bss_info(hapd);
++	}
++	else
++		wpa_printf(MSG_ERROR, "WPAPT: could not connect to CVNF, BSS '%s' "
++				"will be inoperative!", hapd->conf->ssid.ssid);
++
++	return 0;
++}
++
++
++void wpapt_cci_clean(struct hostapd_data *hapd)
++{
++	if (hapd->wpapt_cci != NULL) {
++		/* If there is an alive connection to CVNF - close it */
++		if (hapd->wpapt_cci->cvnf != NULL)
++			wpapt_tls_disconnect_clnt (hapd->wpapt_cci->cvnf);
++
++		os_free(hapd->wpapt_cci);
++		hapd->wpapt_cci = NULL;
++	}
++}
+diff --git a/src/ap/wpapt_cci_clnt.h b/src/ap/wpapt_cci_clnt.h
+new file mode 100644
+index 0000000..1b8d589
+--- /dev/null
++++ b/src/ap/wpapt_cci_clnt.h
+@@ -0,0 +1,55 @@
++/*
++ *   BSD LICENSE
++ * 
++ *   Copyright(c) 2007-2017 Intel Corporation. All rights reserved.
++ *   All rights reserved.
++ * 
++ *   Redistribution and use in source and binary forms, with or without 
++ *   modification, are permitted provided that the following conditions 
++ *   are met:
++ * 
++ *     * Redistributions of source code must retain the above copyright 
++ *       notice, this list of conditions and the following disclaimer.
++ *     * Redistributions in binary form must reproduce the above copyright 
++ *       notice, this list of conditions and the following disclaimer in 
++ *       the documentation and/or other materials provided with the 
++ *       distribution.
++ *     * Neither the name of Intel Corporation nor the names of its 
++ *       contributors may be used to endorse or promote products derived 
++ *       from this software without specific prior written permission.
++ * 
++ *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 
++ *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
++ *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
++ *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT 
++ *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
++ *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
++ *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, 
++ *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY 
++ *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
++ *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
++ *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ * 
++ * Interface between Control VNF server (CVNF) and CPE.
++ */
++
++#ifndef WPAPT_CCI_H
++#define WPAPT_CCI_H
++
++/* Init connection to CVNF. There is no requirement that CVNF server is up
++ * at the moment. If it isn't, connection will be retried at the configured
++ * time interval. */
++int wpapt_cci_init(struct hostapd_data *hapd);
++
++/* Disconnect from CVNF (if we are connected) and clean up data */
++void wpapt_cci_clean(struct hostapd_data *hapd);
++
++/* Send a WPAPT_CCI_MSG_STA_ADD message to CVNF */
++void wpapt_cci_send_sta_add(struct hostapd_data *hapd, const uint8_t *sta_addr,
++		int reassoc, const uint8_t *rsn_ie, int rsn_ie_len);
++
++/* Send a WPAPT_CCI_MSG_STA_REMOVE message to CVNF */
++void wpapt_cci_send_sta_remove(struct hostapd_data *hapd,
++		const uint8_t *sta_addr);
++
++#endif /* WPAPT_CCI_H */
+diff --git a/src/ap/wpapt_cci_msgs.h b/src/ap/wpapt_cci_msgs.h
+new file mode 100644
+index 0000000..f3ebc27
+--- /dev/null
++++ b/src/ap/wpapt_cci_msgs.h
+@@ -0,0 +1,188 @@
++/*
++ *   BSD LICENSE
++ * 
++ *   Copyright(c) 2007-2017 Intel Corporation. All rights reserved.
++ *   All rights reserved.
++ * 
++ *   Redistribution and use in source and binary forms, with or without 
++ *   modification, are permitted provided that the following conditions 
++ *   are met:
++ * 
++ *     * Redistributions of source code must retain the above copyright 
++ *       notice, this list of conditions and the following disclaimer.
++ *     * Redistributions in binary form must reproduce the above copyright 
++ *       notice, this list of conditions and the following disclaimer in 
++ *       the documentation and/or other materials provided with the 
++ *       distribution.
++ *     * Neither the name of Intel Corporation nor the names of its 
++ *       contributors may be used to endorse or promote products derived 
++ *       from this software without specific prior written permission.
++ * 
++ *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 
++ *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
++ *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
++ *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT 
++ *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
++ *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
++ *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, 
++ *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY 
++ *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
++ *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
++ *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ * 
++ * Definition of CCI (CVNF to CPE interface). This header file defines
++ * messages sent between these entities.
++ *
++ * Note 1: All numeric fields are in the LITTLE ENDIAN format.
++ *
++ * Note 2: Naming convention:
++ *         WPAPT_ or wpapt_ is a generic prefix used to avoid name collission.
++ *         Relates to all servers and clients involved in WPA Pass Through.
++ *         WPAPT_CCI_ or wpapt_cci_ is used for definitions specific to CCI.
++ *
++ * Note 3: There is support for only one BSS per CCI connection.
++ *
++ * Note 4: Error handling concept:
++ *       - If either of CVNF or CPE fails in a way that it cannot continue
++ *         it sends a WPAPT_CCI_MSG_STATUS message with an error code and
++ *         textual explanations.
++ *       - Non-critical failures and informational messages about server health
++ *         are also reported through WPAPT_CCI_MSG_STATUS (status could be OK
++ *         or Warning).
++ */
++
++#ifndef WPAPT_CCI_MSGS_H
++#define WPAPT_CCI_MSGS_H
++
++/*                          CVNF to CPE Interface
++ =============================================================================*/
++
++#define WPAPT_CCI_VERSION           1 /* Protocol version */
++#define WPAPT_CCI_MAX_MSG        1500 /* Maximum message size */
++#define WPAPT_CCI_MAGIC    0x57434349 /* 'WCCI' in ASCII */
++
++/* Message identifiers */
++#define WPAPT_CCI_MSG_INIT          1
++#define WPAPT_CCI_MSG_STATUS        2
++#define WPAPT_CCI_MSG_BSS_INFO      3
++#define WPAPT_CCI_MSG_STA_ADD       5
++#define WPAPT_CCI_MSG_STA_REMOVE    6
++#define WPAPT_CCI_MSG_1X_FILTER     7
++#define WPAPT_CCI_MSG_FRAME         8
++
++
++#pragma pack(push,1)
++
++
++/*               Message WPAPT_CCI_MSG_INIT
++ * ----------------------------------------------------------
++ * Direction: Both
++ * Purpose:   Initial handshaking, sending version numbers.
++*/
++
++struct wpapt_cci_msg_init
++{
++    uint16_t  prot_version; /* stepped up whatever compatibility
++                               between peers is concerned */
++    uint32_t  peer_version; /* e.g.0x05050001 for version 5.5.0.1 */
++    uint16_t  peer_id_len;  /* Length of the string that follows */
++    char      peer_id[0];   /* Printable id string */
++};
++
++
++/*               Message WPAPT_CCI_MSG_STATUS
++ * ----------------------------------------------------------
++ * Direction: Both
++ * Purpose:   Error handling, letting the parties to follow the health
++ *            of each other.
++*/
++
++#define WPAPT_CCI_STATUS_OK              0
++#define WPAPT_CCI_STATUS_WARNING         1
++#define WPAPT_CCI_STATUS_ERROR           2
++#define WPAPT_CCI_STATUS_SHUTTING_DOWN   3
++
++struct wpapt_cci_msg_status
++{
++    uint16_t  peer_status;
++    uint16_t  message_len;  /* Length of the reason string */
++    char      message[0];   /* Printable string providing details */
++};
++
++
++/*               Message WPAPT_CCI_MSG_BSS_INFO
++ * ----------------------------------------------------------
++ * Direction: From CPE to CVNF
++ * Purpose:   CPE sends CVNF BSS configuration parameters. The message
++ *            is sent once, immediately after CPE connected to CVNF.
++ */
++
++struct wpapt_cci_msg_bss_info
++{
++    uint8_t  bssid[ETH_ALEN];
++    uint8_t  essid[SSID_MAX_LEN];
++};
++
++
++/*               Message WPAPT_CCI_MSG_STA_ADD
++ * ----------------------------------------------------------
++ * Direction: From CPE to CVNF
++ * Purpose:   CPE asks CVNF to initiate RADIUS/EAPOL sequence.
++ */
++
++struct wpapt_cci_msg_sta_add
++{
++    uint8_t  sta_addr[ETH_ALEN]; /* Station's MAC address */
++	uint32_t cookie;             /* Connection attempt ID */
++	uint8_t  reassoc;            /* Reassociation flag */
++	uint16_t rsn_ie_len;         /* RSN information element length */
++	uint8_t  rsn_ie[0];          /* RSN IE (variable length) */
++};
++
++
++/*               Message WPAPT_CCI_MSG_STA_REMOVE
++ * ----------------------------------------------------------
++ * Direction: Both.
++ * Purpose:   A request to remove the given station from database.
++ */
++
++struct wpapt_cci_msg_sta_remove
++{
++    uint8_t  sta_addr[ETH_ALEN]; /* Station's MAC address */
++	uint32_t cookie;             /* Connection attempt ID */
++    uint32_t reason;             /* Enum is TBD */
++};
++
++
++/*               Message WPAPT_CCI_MSG_1X_FILTER
++ * ----------------------------------------------------------
++ * Direction: From CVNF to CPE.
++ * Purpose:   To inform CPE that a station successfully completed EAPOL.
++ */
++ 
++struct wpapt_cci_msg_1x_filter
++{
++    uint8_t  sta_addr[ETH_ALEN]; /* Station's MAC address */
++	uint32_t cookie;             /* Connection attempt ID */
++	uint8_t  open_filter;        /* Whether to open 802.1X filter */
++};
++
++ 
++/*               Message WPAPT_CCI_MSG_FRAME
++ * ----------------------------------------------------------
++ * Direction: Both.
++ *            From DVNF to CVNF to report a failure.
++ * Purpose:   A request to remove the given station from database.
++ */
++ 
++struct wpapt_cci_msg_frame
++{
++    uint8_t  sta_addr[ETH_ALEN]; /* Station's MAC address */
++	uint32_t cookie;             /* Connection attempt ID */
++	uint16_t frame_len;          /* Frame length */
++	uint8_t  frame[0];           /* Frame (variable length) */
++};
++
++#pragma pack(pop)
++
++#endif /* WPAPT_CCI_MSGS_H */
+diff --git a/src/common/wpapt_tls.c b/src/common/wpapt_tls.c
+new file mode 100644
+index 0000000..29fda92
+--- /dev/null
++++ b/src/common/wpapt_tls.c
+@@ -0,0 +1,689 @@
++/*
++ *   BSD LICENSE
++ * 
++ *   Copyright(c) 2007-2017 Intel Corporation. All rights reserved.
++ *   All rights reserved.
++ * 
++ *   Redistribution and use in source and binary forms, with or without 
++ *   modification, are permitted provided that the following conditions 
++ *   are met:
++ * 
++ *     * Redistributions of source code must retain the above copyright 
++ *       notice, this list of conditions and the following disclaimer.
++ *     * Redistributions in binary form must reproduce the above copyright 
++ *       notice, this list of conditions and the following disclaimer in 
++ *       the documentation and/or other materials provided with the 
++ *       distribution.
++ *     * Neither the name of Intel Corporation nor the names of its 
++ *       contributors may be used to endorse or promote products derived 
++ *       from this software without specific prior written permission.
++ * 
++ *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 
++ *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
++ *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
++ *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT 
++ *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
++ *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
++ *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, 
++ *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY 
++ *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
++ *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
++ *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ * 
++ *            TLS connection used for WPA Pass Through function
++ * =============================================================================
++ */
++
++#include "includes.h"
++#include "common.h"
++#include "eloop.h"
++#include "list.h"
++#include <fcntl.h>
++#include "wpapt_tls.h"
++#include <openssl/ssl.h>
++#include <openssl/err.h>
++
++
++/* Each message starts by this header. By reading this header from a TCP
++ * stream we double check the validity of data in the stream by checking
++ * the magic number, find out the message type and its length.
++ */
++struct wpapt_tls_msg_header
++{
++    uint32_t  magic;       /* expected to be WPAPT_CDI_MAGIC */
++    uint16_t  message_id;  /* message code */
++    uint16_t  payload_len; /* payload length (not counting this header) */
++};
++
++
++#define WPAPT_TLS_MAX_MSG        1500 /* Maximum message size */
++#define WPAPT_TLS_MAX_PAYLOAD    (WPAPT_TLS_MAX_MSG - \
++		                          sizeof(struct wpapt_tls_msg_header))
++
++struct wpapt_tls_server {
++	int                srv_skt;        /* The socket we are listening on */
++	struct sockaddr_in local_addr;
++	SSL_CTX            *ssl_ctx;       /* shared by all clients */
++	uint32_t           msg_hdr_magic;  /* To check header validity */
++	struct dl_list     clnt_list;      /* List of TLS clients */
++
++	/* Callbacks */
++	void                        *srv_ctx;
++	wpapt_tls_on_msg_fnc        on_msg_cb;
++	wpapt_tls_on_new_clnt_fnc   on_new_clnt_cb;
++	wpapt_tls_on_disconnect_fnc on_disconnect_cb;
++};
++
++
++struct wpapt_tls_peer {
++	struct dl_list          clnt_list;      /* Linked list entry */
++	struct wpapt_tls_server *server; /* NULL in the client mode */
++	int                     clnt_skt;       /* TLS client's socket */
++	struct sockaddr_in      local_addr;     /* Not used in server mode */
++	struct sockaddr_in      peer_addr;
++	uint32_t                msg_hdr_magic;  /* To check header validity */
++	uint8_t                 read_buf[WPAPT_TLS_MAX_MSG];
++	uint16_t                read_msg_bytes; /* Bytes received from socket */
++	uint16_t                read_msg_len;   /* Length of the current msg */
++	uint16_t                read_msg_pos;
++	uint8_t                 write_buf[WPAPT_TLS_MAX_MSG];
++	int                     write_msg_pos;
++
++	/* TLS through openssl */
++	SSL_CTX            *ssl_ctx;       /* For client mode only */
++    SSL                *ssl;
++
++	/* Callbacks */
++	void                        *conn_ctx; /* User's ctx for TLS connection */
++	wpapt_tls_on_msg_fnc        on_msg_cb; /* Message dispatch callback */
++	wpapt_tls_on_disconnect_fnc on_disconnect_cb;
++};
++
++
++/*                             Static Utilities                            */
++/*-------------------------------------------------------------------------*/
++
++static SSL_CTX* InitSslCtx(char* root_crt_file, char* crt_file,
++		char* key_file, char* key_password, int server)
++{
++	/* Initialize SSL context for server */
++	const SSL_METHOD *mth = server ? SSLv23_server_method()
++								   : SSLv23_client_method();
++	int res;
++
++    SSL_CTX *ssl_ctx = SSL_CTX_new(mth);
++    if (ssl_ctx == NULL) {
++		wpa_printf(MSG_ERROR, "WPAPT VNF: Unable to create SSL context : %s",
++				ERR_error_string(ERR_get_error(), NULL));
++		return NULL;
++    }
++    SSL_CTX_set_ecdh_auto(ssl_ctx, 1);
++
++    /* Set root certificate certificate */
++    if (SSL_CTX_load_verify_locations(ssl_ctx, root_crt_file,
++    		NULL) <= 0) {
++		wpa_printf(MSG_ERROR, "WPAPT VNF: Unable to load root certificate %s : %s",
++				crt_file, ERR_error_string(ERR_get_error(), NULL));
++		SSL_CTX_free(ssl_ctx);
++		return NULL;
++    }
++
++    /* Set the server certificate */
++    res = server ? SSL_CTX_use_certificate_chain_file(ssl_ctx, crt_file)
++    		     : SSL_CTX_use_certificate_file(ssl_ctx, crt_file,
++    		    		 SSL_FILETYPE_PEM);
++    if (res <= 0) {
++		wpa_printf(MSG_ERROR, "WPAPT VNF: Unable to load own certificate %s : %s",
++				crt_file, ERR_error_string(ERR_get_error(), NULL));
++		SSL_CTX_free(ssl_ctx);
++		return NULL;
++    }
++
++    /* Provide a password for private key (optional, if configured) */
++    if (key_password != NULL && *key_password != '\0')
++    SSL_CTX_set_default_passwd_cb_userdata(ssl_ctx, key_password);
++
++    /* Provide a private key */
++    if (SSL_CTX_use_PrivateKey_file(ssl_ctx, key_file,
++    		SSL_FILETYPE_PEM) <= 0 ) {
++		wpa_printf(MSG_ERROR, "WPAPT VNF: Unable to load own private key "
++				"%s : %s",
++				key_file, ERR_error_string(ERR_get_error(), NULL));
++		SSL_CTX_free(ssl_ctx);
++		return NULL;
++    }
++
++
++    /* Verify private key */
++    if (!SSL_CTX_check_private_key(ssl_ctx))
++    {
++        wpa_printf(MSG_ERROR, "WPAPT VNF: Private key does not match the"
++        		"public certificate\n");
++		SSL_CTX_free(ssl_ctx);
++		return NULL;
++    }
++
++    SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER |
++    		SSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
++    SSL_CTX_set_verify_depth(ssl_ctx, 4);
++    return ssl_ctx;
++}
++
++
++static int wpapt_tls_dispatch_messages(struct wpapt_tls_peer *conn)
++{
++	/* while there are data in the receiving buffer */
++	while (conn->read_msg_bytes >= sizeof(struct wpapt_tls_msg_header)) {
++		/* We have at least 8 bytes, so there is a complete header */
++		uint32_t magic;
++		uint16_t msg_id;
++		uint16_t msg_len;
++
++		/* Validate message header. Note: a cast of u8* to
++		 * wpapt_cdi_msg_header* would violate strict aliasing rules */
++		conn->read_msg_len = sizeof(struct wpapt_tls_msg_header);
++		conn->read_msg_pos = 0;
++		wpapt_tls_get_u32(conn, &magic);
++		wpapt_tls_get_u16(conn, &msg_id);
++		wpapt_tls_get_u16(conn, &msg_len);
++		if (magic != conn->msg_hdr_magic || msg_id < 1 ||
++				msg_len > WPAPT_TLS_MAX_PAYLOAD) {
++			return -1; /* Got garbage */
++		}
++
++		/* Did the complete message arrived from socket? */
++		conn->read_msg_len = msg_len + sizeof(struct wpapt_tls_msg_header);
++		if (conn->read_msg_bytes < conn->read_msg_len)
++			return 0; /* Message isn't complete */
++
++		/* We have at a complete message. Dispatch it. */
++		conn->on_msg_cb(msg_id, msg_len, conn->conn_ctx);
++
++		/* Discard the processed message from the buffer */
++		if (conn->read_msg_bytes > conn->read_msg_len) {
++			int remaining_bytes = conn->read_msg_bytes - conn->read_msg_len;
++			memmove (conn->read_buf + conn->read_msg_len, conn->read_buf,
++					remaining_bytes);
++			conn->read_msg_bytes = remaining_bytes;
++		}
++		else
++			conn->read_msg_len = conn->read_msg_bytes = 0;
++	}
++
++	return 0; /* No more complete messages in the buffer */
++}
++
++
++/*                          Socket event handlers                          */
++/*-------------------------------------------------------------------------*/
++
++static void wpapt_tls_socket_receive(int sock, void *eloop_ctx, void *sock_ctx)
++{
++	struct wpapt_tls_peer *conn = eloop_ctx;
++	(void)sock_ctx; /* unused */
++	int first_recv = 1, recv_done = 0;
++
++	while (!recv_done) {
++		/* Read available data from the socket */
++		int space_in_buf = WPAPT_TLS_MAX_MSG - conn->read_msg_bytes;
++		int bytes_received = SSL_read(conn->ssl,
++				conn->read_buf + conn->read_msg_bytes,
++				space_in_buf);
++
++		if (first_recv && bytes_received < 1) {
++			shutdown(conn->clnt_skt, SHUT_RDWR);
++			wpapt_tls_disconnect_clnt(conn);
++			return; /* Client has disconnected */
++		}
++
++		first_recv = 0;
++		recv_done = bytes_received < space_in_buf;
++
++		if (bytes_received > 0) {
++			conn->read_msg_bytes += bytes_received;
++
++			if (wpapt_tls_dispatch_messages(conn) != 0)
++				wpapt_tls_disconnect_clnt(conn);
++		}
++	}
++}
++
++
++static void wpapt_tls_socket_error(int sock, void *eloop_ctx, void *sock_ctx)
++{
++	struct wpapt_tls_peer *conn = eloop_ctx;
++	(void)sock_ctx; /* unused */
++
++	if (sock == conn->clnt_skt && conn->on_disconnect_cb != NULL)
++		wpapt_tls_disconnect_clnt(conn);
++}
++
++
++static void wpapt_tls_socket_new_clnt(int sock, void *eloop_ctx, void *sock_ctx)
++{
++	struct wpapt_tls_server *server = eloop_ctx;
++	struct wpapt_tls_peer *clnt;
++	struct sockaddr_in cli_addr;
++	int res;
++	socklen_t cli_len;
++	uint32_t cli_ip;
++	(void)sock_ctx; /* unused */
++
++	clnt = os_zalloc(sizeof(struct wpapt_tls_peer));
++	if (clnt == NULL)
++		return;
++	clnt->server = server;
++	clnt->msg_hdr_magic = server->msg_hdr_magic;
++	clnt->on_msg_cb = server->on_msg_cb;
++	clnt->on_disconnect_cb = server->on_disconnect_cb;
++
++	/* Accept actual connection from the client */
++	cli_len = sizeof(cli_addr);
++	clnt->clnt_skt = accept(sock, (struct sockaddr*)&cli_addr, &cli_len);
++	if (clnt->clnt_skt < 0) {
++		wpa_printf(MSG_ERROR, "WPAPT VNF: failed to accept client"
++				"connection : %s", strerror(errno));
++		os_free(clnt);
++		return;
++	}
++
++	// TLS negotiation
++	cli_ip = ntohl(cli_addr.sin_addr.s_addr);
++	clnt->ssl = SSL_new(server->ssl_ctx);
++    SSL_set_fd(clnt->ssl, clnt->clnt_skt);
++	res = SSL_accept(clnt->ssl);
++    if (res <= 0) {
++		wpa_printf(MSG_ERROR, "WPAPT VNF: Rejected client connection from "
++				"%d.%d.%d.%d:%d : %s", cli_ip >> 24, (cli_ip >> 16) & 255,
++				(cli_ip >> 8) & 255, cli_ip & 255, ntohs(cli_addr.sin_port),
++				ERR_error_string(res == 0 ? ERR_get_error() : res, NULL));
++        wpapt_tls_disconnect_clnt(clnt);
++		os_free(clnt);
++		return;
++    }
++
++	wpa_printf(MSG_INFO, "WPAPT VNF: Accepted client connection from "
++			"%d.%d.%d.%d:%d", cli_ip >> 24, (cli_ip >> 16) & 255,
++			(cli_ip >> 8) & 255, cli_ip & 255, ntohs(cli_addr.sin_port));
++
++	/* Register a function that receives data sent by the client */
++	if (eloop_register_read_sock(clnt->clnt_skt,
++			wpapt_tls_socket_receive, clnt, NULL) < 0) {
++		close (clnt->clnt_skt);
++		clnt->clnt_skt = 0;
++		os_free(clnt);
++		return;
++	}
++	if (eloop_register_sock(clnt->clnt_skt, EVENT_TYPE_EXCEPTION,
++			wpapt_tls_socket_error, clnt, NULL) < 0) {
++		eloop_unregister_read_sock(clnt->clnt_skt);
++		close (clnt->clnt_skt);
++		clnt->clnt_skt = 0;
++		os_free(clnt);
++		return;
++	}
++
++	dl_list_add(&server->clnt_list, &clnt->clnt_list);
++
++	clnt->conn_ctx = server->on_new_clnt_cb(server->srv_ctx, clnt);
++	if (clnt->conn_ctx == NULL)
++		wpapt_tls_disconnect_clnt(clnt); /* application rejected the client */
++}
++
++
++/*         Initialization and maintaining connection(s) to peer(s)         */
++/*-------------------------------------------------------------------------*/
++
++/* Initialize openssl library -- to be called once at program startup */
++void wpapt_tls_init()
++{
++    SSL_load_error_strings();
++    OpenSSL_add_ssl_algorithms();
++}
++
++
++// Init the connection in the client mode (connect to WPAPT server).
++struct wpapt_tls_peer* wpapt_tls_connect(
++		struct wpapt_tls_clnt_config *cfg, void *conn_ctx)
++{
++	int socket_flags;
++
++	/* Allocate and initialize struct wpapt_tls_peer */
++	struct wpapt_tls_peer *conn = os_zalloc(sizeof(struct wpapt_tls_peer));
++	if (conn == NULL) {
++		wpa_printf(MSG_ERROR, "WPAPT VNF: Could not allocate memory for "
++			   "connection");
++		return NULL;
++	}
++	conn->conn_ctx = conn_ctx;
++	conn->msg_hdr_magic = cfg->msg_hdr_magic;
++	conn->on_msg_cb = cfg->on_msg_cb;
++
++	// Set up SSL certificates, etc.
++	conn->ssl_ctx = InitSslCtx(cfg->root_crt_file, cfg->clnt_crt_file,
++			cfg->clnt_key_file, cfg->clnt_key_password, 0);
++	if (conn->ssl_ctx == NULL) {
++		os_free(conn); // Error message already printed
++		return NULL;
++	}
++
++	/* Allocate a socket */
++	conn->clnt_skt = socket(PF_INET, SOCK_STREAM, 0);
++	if (conn->clnt_skt < 0) {
++		wpa_printf(MSG_ERROR, "WPAPT VNF: Could not allocate socket: %s",
++				strerror(errno));
++		os_free(conn);
++		return NULL;
++	}
++
++	/* Assign local IP to the socket */
++	conn->local_addr.sin_family = AF_INET;
++	conn->local_addr.sin_addr = cfg->bind_addr;
++	if (bind(conn->clnt_skt, (struct sockaddr *) &conn->local_addr,
++		sizeof(conn->local_addr)) < 0) {
++		wpa_printf(MSG_ERROR, "WPAPT VNF: Cannot bind socket: %s",
++				strerror(errno));
++		close(conn->clnt_skt);
++		os_free(conn);
++		return NULL;
++	}
++
++	/* Connect to a WPAPT TLS server */
++	conn->peer_addr.sin_family = AF_INET;
++	conn->peer_addr.sin_addr = cfg->srv_addr;;
++	conn->peer_addr.sin_port = htons(cfg->port);
++	if (connect(conn->clnt_skt, (struct sockaddr *) &conn->peer_addr,
++		    sizeof(conn->peer_addr)) < 0) {
++		wpa_printf(MSG_ERROR, "WPAPT VNF: Cannot connect to server %s:%d: %s",
++				inet_ntoa(conn->peer_addr.sin_addr), cfg->port,
++				strerror(errno));
++		close(conn->clnt_skt);
++		os_free(conn);
++		return NULL;
++	}
++
++	/* Do TLS handshaking */
++	conn->ssl = SSL_new(conn->ssl_ctx);
++    SSL_set_fd(conn->ssl, conn->clnt_skt);
++    if (SSL_connect(conn->ssl) != 1) {
++		wpa_printf(MSG_ERROR, "WPAPT VNF: TLS negotiation failure : %s",
++				ERR_error_string(ERR_get_error(), NULL));
++    	wpapt_tls_disconnect_clnt(conn);
++		os_free(conn);
++		return NULL;
++    }
++
++	socket_flags = fcntl(conn->clnt_skt, F_GETFL, 0);
++	fcntl(conn->clnt_skt, F_SETFL, socket_flags | O_NONBLOCK);
++
++	/* Register a function that receives data sent by server */
++	if (eloop_register_read_sock(conn->clnt_skt,
++			wpapt_tls_socket_receive, conn, NULL) < 0) {
++		close(conn->clnt_skt);
++		os_free(conn);
++		return NULL;
++	}
++
++	return conn;
++}
++
++
++/* Start a WPAPT server -- listen for incoming connections */
++struct wpapt_tls_server* wpapt_tls_start_listening(
++		struct wpapt_tls_srv_config *cfg, void *srv_ctx)
++{
++	/* Allocate and initialize struct wpapt_tls_peer */
++	struct wpapt_tls_server *server = os_zalloc(sizeof(struct wpapt_tls_server));
++	if (server == NULL) {
++		wpa_printf(MSG_ERROR, "WPAPT VNF: Could not allocate memory for "
++			   "connection");
++		return NULL;
++	}
++	dl_list_init(&server->clnt_list);
++	server->srv_ctx = srv_ctx;
++	server->msg_hdr_magic = cfg->msg_hdr_magic;
++	server->on_msg_cb = cfg->on_msg_cb;
++	server->on_new_clnt_cb = cfg->on_new_clnt_cb;
++	server->on_disconnect_cb = cfg->on_disconnect_cb;
++
++	// Set up SSL certificates, etc.
++	server->ssl_ctx = InitSslCtx(cfg->root_crt_file, cfg->srv_crt_file,
++			cfg->srv_key_file, cfg->srv_key_password, 1);
++	if (server->ssl_ctx == NULL) {
++		os_free(server); // Error message already printed
++		return NULL;
++	}
++
++    /* Allocate a socket */
++	server->srv_skt = socket(PF_INET, SOCK_STREAM, 0);
++	if (server->srv_skt < 0) {
++		wpa_printf(MSG_ERROR, "WPAPT VNF: Could not allocate socket: %s",
++				strerror(errno));
++		os_free(server);
++		return NULL;
++	}
++
++	/* Assign local IP to the socket */
++	server->local_addr.sin_family = AF_INET;
++	server->local_addr.sin_addr = cfg->bind_addr;
++	server->local_addr.sin_port = htons(cfg->port);
++	if (bind(server->srv_skt, (struct sockaddr *) &server->local_addr,
++		 sizeof(server->local_addr)) < 0) {
++		wpa_printf(MSG_ERROR, "WPAPT VNF: Cannot bind socket: %s",
++				strerror(errno));
++		close(server->srv_skt);
++		os_free(server);
++		return NULL;
++	}
++
++	/* Don't turn the socket to an unblocked operation because connection accept in
++	 * wpapt_tls_socket_new_clnt doesn't support it */
++
++	SSL_CTX_set_mode(server->ssl_ctx, SSL_MODE_AUTO_RETRY);
++
++	/* Register a function that handles incoming connections */
++	if (listen(server->srv_skt, 5 /* max backlog */) < 0 ||
++	    eloop_register_sock(server->srv_skt, EVENT_TYPE_READ,
++	    		wpapt_tls_socket_new_clnt, server, NULL)) {
++		close(server->srv_skt);
++		os_free(server);
++		return NULL;
++	}
++
++	return server;
++}
++
++
++/* In server mode - disconnect the clients, but keep listening.
++ * In client mode - disconnect from server
++ */
++void wpapt_tls_disconnect_clnt(struct wpapt_tls_peer *peer)
++{
++	if (peer->on_disconnect_cb != NULL && peer->conn_ctx != NULL )
++		peer->on_disconnect_cb(peer->conn_ctx);
++
++	/* In the client mode we release peer->ssl_ctx here. In the server mode
++	 * we keep listening until wpapt_tls_disconnect_srv is called */
++	if (peer->server == NULL && peer->ssl_ctx != NULL) {
++		SSL_CTX_free(peer->ssl_ctx);
++		peer->ssl_ctx = NULL;
++	}
++
++	if (peer->server != NULL)
++		dl_list_del(&peer->clnt_list);
++
++	if (peer->ssl != NULL) {
++		SSL_free(peer->ssl);
++		peer->ssl = NULL;
++	}
++
++	if (peer->clnt_skt > 0)	{
++		eloop_unregister_read_sock(peer->clnt_skt);
++		eloop_unregister_sock(peer->clnt_skt, EVENT_TYPE_EXCEPTION);
++		close (peer->clnt_skt);
++		peer->clnt_skt = 0;
++	}
++}
++
++
++/* Used in server mode only - stop listening for incoming connections */
++void wpapt_tls_disconnect_srv(struct wpapt_tls_server *server)
++{
++	/* Disconnect all clients*/
++	struct wpapt_tls_peer *client;
++	dl_list_for_each(client, &server->clnt_list, struct wpapt_tls_peer,
++					 clnt_list) {
++		wpapt_tls_disconnect_clnt(client);
++	}
++
++	if (server->ssl_ctx != NULL) {
++		SSL_CTX_free(server->ssl_ctx);
++		server->ssl_ctx = NULL;
++	}
++
++	if (server->srv_skt > 0) {
++		eloop_unregister_read_sock(server->srv_skt);
++		close (server->srv_skt);
++		server->srv_skt = 0;
++	}
++}
++
++
++/*                 Formatting and sending outgoing messages                */
++/*-------------------------------------------------------------------------*/
++
++void wpapt_tls_init_msg(struct wpapt_tls_peer *peer, uint16_t msg_id)
++{
++	peer->write_msg_pos = 0;
++	wpapt_tls_put_u32(peer, peer->msg_hdr_magic);
++	wpapt_tls_put_u16(peer, msg_id);
++	wpapt_tls_put_u16(peer, 0); /* placeholder for message length */
++}
++
++
++int wpapt_tls_put_data(struct wpapt_tls_peer *peer, const void* data,
++		int len)
++{
++	if (peer->write_msg_pos + len > WPAPT_TLS_MAX_MSG)
++		return -1;
++
++	if (len > 0) {
++		memcpy (peer->write_buf + peer->write_msg_pos, data, len);
++		peer->write_msg_pos += len;
++	}
++
++	return 0;
++}
++
++
++int wpapt_tls_put_u8(struct wpapt_tls_peer *peer, u8 data)
++{
++	if (peer->write_msg_pos + sizeof(u8) > WPAPT_TLS_MAX_MSG)
++		return -1;
++
++	memcpy (peer->write_buf + peer->write_msg_pos, &data, sizeof(u8));
++	peer->write_msg_pos += sizeof(u8);
++	return 0;
++}
++
++
++int wpapt_tls_put_u16(struct wpapt_tls_peer *peer, uint16_t data)
++{
++	uint16_t tmp = host_to_le16(data);
++
++	if (peer->write_msg_pos + 2 > WPAPT_TLS_MAX_MSG)
++		return -1;
++
++	memcpy (peer->write_buf + peer->write_msg_pos, &tmp, 2);
++	peer->write_msg_pos += 2;
++	return 0;
++}
++
++
++int wpapt_tls_put_u32(struct wpapt_tls_peer *peer, uint32_t data)
++{
++	uint32_t tmp = host_to_le32(data);
++
++	if (peer->write_msg_pos + 4 > WPAPT_TLS_MAX_MSG)
++		return -1;
++
++	memcpy (peer->write_buf + peer->write_msg_pos, &tmp, 4);
++	peer->write_msg_pos += 4;
++	return 0;
++}
++
++
++int wpapt_tls_send_msg(struct wpapt_tls_peer *peer)
++{
++	/* Note: a cast of u8* to wpapt_cdi_msg_header* would violate strict
++	 * aliasing rules */
++	int msg_len = peer->write_msg_pos;
++	peer->write_msg_pos = 6; /* fix message length */
++	wpapt_tls_put_u16 (peer, msg_len - sizeof(struct wpapt_tls_msg_header));
++	peer->write_msg_pos = 0;
++	return (SSL_write(peer->ssl, peer->write_buf, msg_len) == msg_len) ? 0 : -1;
++}
++
++
++/*                  Reading and parsing incoming messages                  */
++/*-------------------------------------------------------------------------*/
++
++uint8_t* wpapt_tls_get_read_ptr(struct wpapt_tls_peer *peer)
++{
++	return peer->read_buf + peer->read_msg_pos;
++}
++
++
++int wpapt_tls_get_data(
++		struct wpapt_tls_peer *peer,
++		void* data, int len)
++{
++	if (peer->read_msg_pos + len > peer->read_msg_len)
++		return -1;
++
++	memcpy (data, peer->read_buf + peer->read_msg_pos, len);
++	peer->read_msg_pos += len;
++	return 0;
++}
++
++
++int wpapt_tls_get_u16(
++		struct wpapt_tls_peer *peer,
++		uint16_t *data)
++{
++	uint16_t tmp;
++
++	if (peer->read_msg_pos + 2 > peer->read_msg_len)
++		return -1;
++
++	memcpy (&tmp, peer->read_buf + peer->read_msg_pos, 2);
++	peer->read_msg_pos += 2;
++	*data = le_to_host16(tmp);
++	return 0;
++}
++
++
++int wpapt_tls_get_u32(struct wpapt_tls_peer *peer, uint32_t *data)
++{
++	uint32_t tmp;
++
++	if (peer->read_msg_pos + 4 > peer->read_msg_len)
++		return -1;
++
++	memcpy (&tmp, peer->read_buf + peer->read_msg_pos, 4);
++	peer->read_msg_pos += 4;
++	*data = le_to_host32(tmp);
++	return 0;
++}
++
++
++/* The returned pointer needs to be freed */
++char* wpapt_tls_get_sz(struct wpapt_tls_peer *peer, uint16_t len)
++{
++	char* sz = os_malloc(len + 1);
++	if (sz == NULL)
++		return NULL;
++	wpapt_tls_get_data(peer, sz, len);
++	sz[len] = 0;
++	return sz;
++}
+diff --git a/src/common/wpapt_tls.h b/src/common/wpapt_tls.h
+new file mode 100644
+index 0000000..996bfcb
+--- /dev/null
++++ b/src/common/wpapt_tls.h
+@@ -0,0 +1,134 @@
++ /*
++ *   BSD LICENSE
++ * 
++ *   Copyright(c) 2007-2017 Intel Corporation. All rights reserved.
++ *   All rights reserved.
++ * 
++ *   Redistribution and use in source and binary forms, with or without 
++ *   modification, are permitted provided that the following conditions 
++ *   are met:
++ * 
++ *     * Redistributions of source code must retain the above copyright 
++ *       notice, this list of conditions and the following disclaimer.
++ *     * Redistributions in binary form must reproduce the above copyright 
++ *       notice, this list of conditions and the following disclaimer in 
++ *       the documentation and/or other materials provided with the 
++ *       distribution.
++ *     * Neither the name of Intel Corporation nor the names of its 
++ *       contributors may be used to endorse or promote products derived 
++ *       from this software without specific prior written permission.
++ * 
++ *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 
++ *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
++ *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
++ *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT 
++ *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
++ *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
++ *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, 
++ *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY 
++ *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
++ *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
++ *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ * 
++ *             TLS connection used for WPA Pass Through function
++ * =============================================================================
++ */
++
++#ifndef WPA_PT_TLS_H
++#define WPA_PT_TLS_H
++
++/* Private data for WPAPT_TLS */
++struct wpapt_tls_server; /* only used in server mode */
++struct wpapt_tls_peer;   /* remote peer (TLS client if we are a server) */
++
++
++/* Prototype typedefs for callback functions */
++
++/* Dispatch a message from a peer */
++typedef void (*wpapt_tls_on_msg_fnc)(uint16_t msg_id, uint16_t msg_len,
++		void* conn_ctx);
++
++/* Inform the application that a new client has connected to the TLS server
++ * Shall return a user's context, will be used in callbacks from our side
++ * to identify the client message is coming from */
++typedef void* (*wpapt_tls_on_new_clnt_fnc)(void* srv_ctx,
++		struct wpapt_tls_peer* conn);
++
++/* Inform the application that a peer has disconnected.
++ * The application may release (free) the user's context. */
++typedef void (*wpapt_tls_on_disconnect_fnc)(void* conn_ctx);
++
++
++/* Configuration parameters for a client connecting to a WPAPT TLS server */
++struct wpapt_tls_clnt_config {
++	struct in_addr bind_addr;
++	struct in_addr srv_addr;
++	uint16_t       port;
++	uint32_t       msg_hdr_magic; /* To check header validity */
++	char*          root_crt_file; /* Trust certificates signed by this one */
++	char*          clnt_crt_file; /* Own certificate */
++	char*          clnt_key_file; /* Own private key */
++	char*          clnt_key_password;
++
++	/* Callbacks */
++	wpapt_tls_on_msg_fnc        on_msg_cb;
++	wpapt_tls_on_disconnect_fnc on_disconnect_cb;
++};
++
++
++/* Configuration parameters to start a TLS interface in the server mode */
++struct wpapt_tls_srv_config {
++	struct in_addr bind_addr;
++	uint16_t       port;
++	uint32_t       msg_hdr_magic; /* To check header validity */
++	char*          root_crt_file; /* Trust certificates signed by this one */
++	char*          srv_crt_file;  /* Own certificate */
++	char*          srv_key_file;  /* Own private key */
++	char*          srv_key_password;
++
++	/* Callbacks */
++	wpapt_tls_on_msg_fnc        on_msg_cb;
++	wpapt_tls_on_new_clnt_fnc   on_new_clnt_cb;
++	wpapt_tls_on_disconnect_fnc on_disconnect_cb;
++};
++
++
++/* Initialization and maintaining connection(s) to peer(s) */
++/***********************************************************/
++
++void wpapt_tls_init(); /* to be called once at program startup */
++
++struct wpapt_tls_peer* wpapt_tls_connect(
++		struct wpapt_tls_clnt_config *cfg, void *conn_ctx);
++
++struct wpapt_tls_server* wpapt_tls_start_listening(
++		struct wpapt_tls_srv_config *cfg, void *srv_ctx);
++
++void wpapt_tls_disconnect_clnt(struct wpapt_tls_peer *conn);
++void wpapt_tls_disconnect_srv(struct wpapt_tls_server *server);
++
++
++/* Formatting and sending outgoing messages */
++/********************************************/
++
++void wpapt_tls_init_msg(struct wpapt_tls_peer *conn, uint16_t msg_id);
++int wpapt_tls_put_data(struct wpapt_tls_peer *conn, const void* data,
++		int len);
++int wpapt_tls_put_u8(struct wpapt_tls_peer *conn, uint8_t data);
++int wpapt_tls_put_u16(struct wpapt_tls_peer *conn, uint16_t data);
++int wpapt_tls_put_u32(struct wpapt_tls_peer *conn, uint32_t data);
++int wpapt_tls_send_msg(struct wpapt_tls_peer *conn);
++
++
++/* Reading and parsing incoming messages */
++/*****************************************/
++
++uint8_t* wpapt_tls_get_read_ptr(struct wpapt_tls_peer *conn);
++int wpapt_tls_get_data(struct wpapt_tls_peer *conn, void* data,
++		int len);
++int wpapt_tls_get_u16(struct wpapt_tls_peer *conn, uint16_t *data);
++int wpapt_tls_get_u32(struct wpapt_tls_peer *conn, uint32_t *data);
++/* The returned pointer needs to be freed */
++char* wpapt_tls_get_sz(struct wpapt_tls_peer *conn, uint16_t len);
++
++#endif /* WPA_PT_TLS_H */
