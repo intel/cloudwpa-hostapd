@@ -127,7 +127,7 @@ index 1210d43..56be08d 100644
  	.set_param = nl80211_set_param,
  	.get_radio_name = nl80211_get_radio_name,
 -	.add_pmkid = nl80211_add_pmkid,
-+	.add_pmkid = nl80211_add_pmkid,src/drivers/driver_nl80211.c.rej
++	.add_pmkid = nl80211_add_pmkid,
  	.remove_pmkid = nl80211_remove_pmkid,
  	.flush_pmkid = nl80211_flush_pmkid,
  	.set_rekey_info = nl80211_set_rekey_info,
@@ -136,7 +136,7 @@ index 1210d43..56be08d 100644
  	.get_mac_addr = wpa_driver_nl80211_get_macaddr,
  	.get_survey = wpa_driver_nl80211_get_survey,
 -	.status = wpa_driver_nl80211_status,
-+	.status = wpa_driver_nl80211_status,src/drivers/driver_nl80211.c.rej
++	.status = wpa_driver_nl80211_status,
  	.switch_channel = nl80211_switch_channel,
  #ifdef ANDROID_P2P
  	.set_noa = wpa_driver_set_p2p_noa,
@@ -145,7 +145,7 @@ index 1210d43..56be08d 100644
  	.br_port_set_attr = wpa_driver_br_port_set_attr,
  	.br_set_net_param = wpa_driver_br_set_net_param,
 -	.add_tx_ts = nl80211_add_ts,
-+	.add_tx_ts = nl80211_add_ts,src/drivers/driver_nl80211.c.rej
++	.add_tx_ts = nl80211_add_ts,
  	.del_tx_ts = nl80211_del_ts,
  	.get_ifindex = nl80211_get_ifindex,
  #ifdef CONFIG_DRIVER_NL80211_QCA
@@ -154,7 +154,7 @@ index 1210d43..56be08d 100644
  	.p2p_lo_start = nl80211_p2p_lo_start,
  	.p2p_lo_stop = nl80211_p2p_lo_stop,
 -	.set_default_scan_ies = nl80211_set_default_scan_ies,
-+	.set_default_scan_ies = nl80211_set_default_scan_ies,srcsrc/drivers/driver_nl80211.c.rej/drivers/driver_nl80211.c.rej
++	.set_default_scan_ies = nl80211_set_default_scan_ies,
  #endif /* CONFIG_DRIVER_NL80211_QCA */
  	.configure_data_frame_filters = nl80211_configure_data_frame_filters,
  	.get_ext_capab = nl80211_get_ext_capab,

@@ -411,10 +411,10 @@ index 5079f69..3da3dc3 100644
  		bss->ieee80211w = atoi(pos);
 diff --git a/hostapd/wpapt.conf b/hostapd/wpapt.conf
 new file mode 100644
-index 0000000..4907b02
+index 0000000..518983e
 --- /dev/null
 +++ b/hostapd/wpapt.conf
-@@ -0,0 +1,91 @@
+@@ -0,0 +1,79 @@
 +################ Physical radio parameters ################
 +interface=wlan2
 +driver=wpapt_vnf
@@ -456,12 +456,10 @@ index 0000000..4907b02
 +wmm_ac_vo_txop_limit=47
 +############## wlan2 VAP parameters #############
 +vendor_elements=dd050009860100
-+#bssid=ac:9a:96:f4:86:c4
-+#bssid=ac:9a:96:f5:64:10
-+bssid=00:E0:92:00:01:60
++bssid=ac:9a:96:f4:86:d0
 +###___SSID_parameters___###
 +bridge=br-lan
-+ssid=3873220568
++ssid=213_VNF
 +###___AccessPoint_parameters___###
 +ignore_broadcast_ssid=0
 +ap_isolate=0
@@ -476,35 +474,133 @@ index 0000000..4907b02
 +###___Security_parameters___###
 +auth_algs=1
 +eapol_key_index_workaround=0
-+wpa=2
-+#eap_server=0
-+wpa_key_mgmt=WPA-EAP
-+#wpa_key_mgmt=WPA-PSK
++wpa=3
++#wpa_key_mgmt=WPA-EAP
++wpa_key_mgmt=WPA-PSK
 +wpa_passphrase=test_passphrase
-+wpa_psk_radius=0
 +wpa_group_rekey=3600
-+#wpa_group_rekey=60
 +wpa_gmk_rekey=3600
 +wpa_pairwise=CCMP
 +rsn_pairwise=CCMP
-+ieee8021x=1
++ieee8021x=0
 +#auth_server_addr=10.1.1.1
 +#auth_server_port=1812
-+nas_identifier=192.168.1.103
-+auth_server_addr=192.168.1.121
-+auth_server_port=1812
-+auth_server_shared_secret=radius_secret
++#auth_server_shared_secret=radius_secret
 +#acct_server_addr=10.1.1.1
 +#acct_server_port=1813
-+#acct_server_addr=192.168.222.1
-+#acct_server_port=1813
 +#acct_server_shared_secret=radius_secret
-+eap_reauth_period=36000
++eap_reauth_period=3600
 +
 +############## WPAPT parameters: TLS server for DVNF clients #############
-+#driver_params=127.0.0.1:22022,"../wpapt_test_crt/root.crt","../wpapt_test_crt/cvnf.crt","../wpapt_test_crt/cvnf.key","BlueFish"
-+#driver_params=192.168.1.123:22022,"../wpapt_test_crt/root.crt","../wpapt_test_crt/cvnf.crt","../wpapt_test_crt/cvnf.key","BlueFish"
-+driver_params=192.168.131.10:22022,"../wpapt_test_crt/root.crt","../wpapt_test_crt/cvnf.crt","../wpapt_test_crt/cvnf.key","BlueFish"
++driver_params=127.0.0.1:2303,"../wpapt_test_crt/root.crt","../wpapt_test_crt/cvnf.crt","../wpapt_test_crt/cvnf.key","BlueFish"
++
+diff --git a/hostapd/wpapt_ee.conf b/hostapd/wpapt_ee.conf
+new file mode 100644
+index 0000000..7e60520
+--- /dev/null
++++ b/hostapd/wpapt_ee.conf
+@@ -0,0 +1,102 @@
++################ Physical radio parameters ################
++interface=wlan2
++driver=wpapt_vnf
++wpapt_cci_port=2004
++wpapt_cci_crt=../wpapt_test_crt/cvnf.crt
++wpapt_cci_key=../wpapt_test_crt/cvnf.key
++wpapt_cci_key_pw=BlueFish
++wpapt_root_crt=../wpapt_test_crt/root.crt
++logger_syslog_level=3
++ctrl_interface=udp:8877
++ctrl_interface_group=0
++###___Radio_parameters___###
++country_code=US
++hw_mode=a
++ieee80211d=1
++channel=36
++preamble=1
++beacon_int=100
++ieee80211n=1
++ht_capab=[HT40+][SHORT-GI-20][SHORT-GI-40][TX-STBC][RX-STBC1][LDPC][MAX-AMSDU-7935]
++ieee80211h=1
++obss_interval=0
++###___WMM_parameters___###
++wmm_ac_be_aifs=3
++wmm_ac_be_cwmin=4
++wmm_ac_be_cwmax=10
++wmm_ac_be_txop_limit=0
++wmm_ac_bk_aifs=7
++wmm_ac_bk_cwmin=4
++wmm_ac_bk_cwmax=10
++wmm_ac_bk_txop_limit=0
++wmm_ac_vi_aifs=2
++wmm_ac_vi_cwmin=3
++wmm_ac_vi_cwmax=4
++wmm_ac_vi_txop_limit=94
++wmm_ac_vo_aifs=2
++wmm_ac_vo_cwmin=2
++wmm_ac_vo_cwmax=3
++wmm_ac_vo_txop_limit=47
++############## wlan2 VAP parameters #############
++vendor_elements=dd050009860100
++bssid=ac:9a:96:f4:86:d0
++###___SSID_parameters___###
++bridge=br-lan
++ssid=213_VNF
++###___AccessPoint_parameters___###
++ignore_broadcast_ssid=0
++ap_isolate=0
++dtim_period=2
++ap_max_inactivity=60
++max_num_sta=128
++wmm_enabled=1
++uapsd_advertisement_enabled=1
++macaddr_acl=0
++###___MBO_parameters___###
++rrm_neighbor_report=1
++###___Security_parameters___###
++auth_algs=1
++eapol_key_index_workaround=0
++wpa=3
++#wpa_key_mgmt=WPA-EAP
++wpa_key_mgmt=WPA-PSK
++wpa_passphrase=test_passphrase
++wpa_group_rekey=3600
++wpa_gmk_rekey=3600
++wpa_pairwise=CCMP
++rsn_pairwise=CCMP
++ieee8021x=0
++#auth_server_addr=10.1.1.1
++#auth_server_port=1812
++#auth_server_shared_secret=radius_secret
++#acct_server_addr=10.1.1.1
++#acct_server_port=1813
++#acct_server_shared_secret=radius_secret
++eap_reauth_period=3600
++
++############## wlan3 VAP parameters #############
++bss=wlan3
++vendor_elements=dd050009860100
++bssid=AC:9A:96:F5:79:70
++ssid=VNF2_5G
++###___Security_parameters___###
++auth_algs=1
++wpa=2
++wpa_key_mgmt=WPA-PSK
++wpa_passphrase=test_passphrase
++wpa_group_rekey=3600
++wpa_gmk_rekey=3600
++wpa_pairwise=CCMP
++rsn_pairwise=CCMP
++ieee8021x=0
++#auth_server_addr=10.1.1.1
++#auth_server_port=1812
++#auth_server_shared_secret=radius_secret
++#acct_server_addr=10.1.1.1
++#acct_server_port=1813
++#acct_server_shared_secret=radius_secret
++eap_reauth_period=3600
++
++############## WPAPT parameters: TLS server for DVNF clients #############
++driver_params=127.0.0.1:2303,"../wpapt_test_crt/root.crt","../wpapt_test_crt/cvnf.crt","../wpapt_test_crt/cvnf.key","BlueFish"
 +
 diff --git a/memo.txt b/memo.txt
 new file mode 100644
@@ -574,6 +670,31 @@ index 8c8f7e2..0388c6f 100644
  };
  
  
+diff --git a/src/ap/ap_drv_ops.h b/src/ap/ap_drv_ops.h
+index 0bb7954..7c3bec6 100644
+--- a/src/ap/ap_drv_ops.h
++++ b/src/ap/ap_drv_ops.h
+@@ -177,6 +177,20 @@ static inline int hostapd_drv_hapd_send_eapol(struct hostapd_data *hapd,
+ 					     hapd->own_addr, flags);
+ }
+ 
++
++static inline int hostapd_drv_hapd_send_eapol_mic(struct hostapd_data *hapd,
++					      const u8 *addr, u16 frame_type, const u8* key,
++						  size_t key_len, int key_info_type, int akm,
++						  const u8 *data, size_t data_len, int encrypt,
++					      u32 flags)
++{
++	if (hapd->driver == NULL || hapd->driver->hapd_send_eapol_mic == NULL)
++		return 0;
++	return hapd->driver->hapd_send_eapol_mic(hapd->drv_priv, addr, frame_type,
++			key, key_len, key_info_type, akm, data, data_len, encrypt,
++					     hapd->own_addr, flags);
++}
++
+ static inline int hostapd_drv_read_sta_data(
+ 	struct hostapd_data *hapd, struct hostap_sta_driver_data *data,
+ 	const u8 *addr)
 diff --git a/src/ap/hostapd.c b/src/ap/hostapd.c
 index 9fafc7f..17c9ec6 100644
 --- a/src/ap/hostapd.c
@@ -703,12 +824,108 @@ index 099de62..7ad5719 100644
  #define WLAN_STA_PENDING_DISASSOC_CB BIT(29)
  #define WLAN_STA_PENDING_DEAUTH_CB BIT(30)
  #define WLAN_STA_NONERP BIT(31)
+diff --git a/src/ap/wpa_auth.c b/src/ap/wpa_auth.c
+index 3587086..a7094f2 100644
+--- a/src/ap/wpa_auth.c
++++ b/src/ap/wpa_auth.c
+@@ -153,6 +153,18 @@ wpa_auth_send_eapol(struct wpa_authenticator *wpa_auth, const u8 *addr,
+ }
+ 
+ 
++static inline int
++wpa_auth_send_eapol_mic(struct wpa_authenticator *wpa_auth, const u8 *addr,
++			u16 frame_type, const u8* key, size_t key_len, int key_info_type,
++			int akm, const u8 *data, size_t data_len, int encrypt)
++{
++	if (wpa_auth->cb.send_eapol_mic == NULL)
++		return -1;
++	return wpa_auth->cb.send_eapol_mic(wpa_auth->cb.ctx, addr, frame_type, key,
++			key_len, key_info_type, akm, data, data_len, encrypt);
++}
++
++
+ #ifdef CONFIG_MESH
+ static inline int wpa_auth_start_ampe(struct wpa_authenticator *wpa_auth,
+ 				      const u8 *addr)
+@@ -1599,8 +1611,17 @@ void __wpa_send_eapol(struct wpa_authenticator *wpa_auth,
+ 
+ 	wpa_auth_set_eapol(sm->wpa_auth, sm->addr, WPA_EAPOL_inc_EapolFramesTx,
+ 			   1);
+-	wpa_auth_send_eapol(wpa_auth, sm->addr, (u8 *) hdr, len,
+-			    sm->pairwise_set);
++
++	wpa_printf(MSG_INFO, "__wpa_send_eapol: wpa_ptk_state=%d, wpa_ptk_group_state=%d",
++			sm->wpa_ptk_state, sm->wpa_ptk_group_state);
++	if (0) {
++		wpa_auth_send_eapol_mic(wpa_auth, sm->addr, 0/*u16 frame_type*/,
++		sm->PTK.kck, sm->PTK.kck_len, 0 /*int key_info_type*/,
++		sm->wpa_key_mgmt, (u8 *) hdr, len, sm->pairwise_set);
++	}
++	else
++		wpa_auth_send_eapol(wpa_auth, sm->addr, (u8 *) hdr, len,
++					sm->pairwise_set);
+ 	os_free(hdr);
+ }
+ 
+diff --git a/src/ap/wpa_auth.h b/src/ap/wpa_auth.h
+index 0de8d97..ac5a7b5 100644
+--- a/src/ap/wpa_auth.h
++++ b/src/ap/wpa_auth.h
+@@ -214,6 +214,9 @@ struct wpa_auth_callbacks {
+ 	int (*get_seqnum)(void *ctx, const u8 *addr, int idx, u8 *seq);
+ 	int (*send_eapol)(void *ctx, const u8 *addr, const u8 *data,
+ 			  size_t data_len, int encrypt);
++	int (*send_eapol_mic)(void *ctx, const u8 *addr, u16 frame_type,
++			  const u8* key, size_t key_len, int key_info_type, int akm,
++			  const u8 *data, size_t data_len, int encrypt);
+ 	int (*for_each_sta)(void *ctx, int (*cb)(struct wpa_state_machine *sm,
+ 						 void *ctx), void *cb_ctx);
+ 	int (*for_each_auth)(void *ctx, int (*cb)(struct wpa_authenticator *a,
+diff --git a/src/ap/wpa_auth_glue.c b/src/ap/wpa_auth_glue.c
+index 2142414..73ecb1e 100644
+--- a/src/ap/wpa_auth_glue.c
++++ b/src/ap/wpa_auth_glue.c
+@@ -352,6 +352,26 @@ static int hostapd_wpa_auth_send_eapol(void *ctx, const u8 *addr,
+ }
+ 
+ 
++
++static int hostapd_wpa_auth_send_eapol_mic(void *ctx, const u8 *addr,
++					u16 frame_type, const u8* key, size_t key_len,
++				    int key_info_type, int akm, const u8 *data,
++					size_t data_len, int encrypt)
++{
++	struct hostapd_data *hapd = ctx;
++	struct sta_info *sta;
++	u32 flags = 0;
++
++	sta = ap_get_sta(hapd, addr);
++	if (sta)
++		flags = hostapd_sta_flags_to_drv(sta->flags);
++
++	return hostapd_drv_hapd_send_eapol_mic(hapd, addr, frame_type, key,
++					   key_len, key_info_type, akm, data, data_len,
++					   encrypt, flags);
++}
++
++
+ static int hostapd_wpa_auth_for_each_sta(
+ 	void *ctx, int (*cb)(struct wpa_state_machine *sm, void *ctx),
+ 	void *cb_ctx)
+@@ -616,6 +636,7 @@ int hostapd_setup_wpa(struct hostapd_data *hapd)
+ 	cb.set_key = hostapd_wpa_auth_set_key;
+ 	cb.get_seqnum = hostapd_wpa_auth_get_seqnum;
+ 	cb.send_eapol = hostapd_wpa_auth_send_eapol;
++	cb.send_eapol_mic = hostapd_wpa_auth_send_eapol_mic;
+ 	cb.for_each_sta = hostapd_wpa_auth_for_each_sta;
+ 	cb.for_each_auth = hostapd_wpa_auth_for_each_auth;
+ 	cb.send_ether = hostapd_wpa_auth_send_ether;
 diff --git a/src/ap/wpapt_cci_msgs.h b/src/ap/wpapt_cci_msgs.h
 new file mode 100644
-index 0000000..f16820e
+index 0000000..91474a6
 --- /dev/null
 +++ b/src/ap/wpapt_cci_msgs.h
-@@ -0,0 +1,189 @@
+@@ -0,0 +1,188 @@
 +/*
 + *   BSD LICENSE
 + * 
@@ -740,7 +957,6 @@ index 0000000..f16820e
 + *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
 + *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
 + *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-+ *  
 + */
 +/* Definition of CCI (CVNF to CPE interface). This header file defines
 + * messages sent between these entities.
@@ -900,10 +1116,10 @@ index 0000000..f16820e
 +#endif /* WPAPT_CCI_MSGS_H */
 diff --git a/src/ap/wpapt_cci_srv.c b/src/ap/wpapt_cci_srv.c
 new file mode 100644
-index 0000000..6ca1db7
+index 0000000..b854d53
 --- /dev/null
 +++ b/src/ap/wpapt_cci_srv.c
-@@ -0,0 +1,435 @@
+@@ -0,0 +1,438 @@
 +/*
 + *   BSD LICENSE
 + * 
@@ -935,8 +1151,8 @@ index 0000000..6ca1db7
 + *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
 + *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
 + *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-+ *  
-+ *  wpapt_cci_srv.c: Implementation of CCI (CVNF to CPE Interface) server
++ */
++/*   wpapt_cci_srv.c: Implementation of CCI (CVNF to CPE Interface) server
 + * ======================================================================== */
 +
 +#include "includes.h"
@@ -967,7 +1183,7 @@ index 0000000..6ca1db7
 +};
 +
 +
-+/*                           Sending messages to CVNF
++/*                           Sending messages to CPE
 + * ==========================================================================*/
 +
 +/* Send WPAPT_CCI_MSG_INIT to CPE */
@@ -1049,7 +1265,7 @@ index 0000000..6ca1db7
 +}
 +
 +
-+/* Send WPAPT_CCI_MSG_BSS_INFO to CVNF */
++/* Dispatch WPAPT_CCI_MSG_BSS_INFO received from CPE */
 +static void wpapt_cci_dispatch_bss_info(
 +		struct wpapt_cci_connection *clnt,
 +		struct wpapt_cci_msg_bss_info *msg)
@@ -1088,7 +1304,7 @@ index 0000000..6ca1db7
 +}
 +
 +
-+/* Send WPAPT_CCI_MSG_STA_ADD to CVNF */
++/* Dispatch WPAPT_CCI_MSG_STA_ADD received from CPE */
 +void wpapt_cci_dispatch_sta_add(
 +		struct wpapt_cci_connection *clnt,
 +		struct wpapt_cci_msg_sta_add *msg, uint8_t *rsn_ie)
@@ -1141,6 +1357,7 @@ index 0000000..6ca1db7
 +}
 +
 +
++/* Dispatch WPAPT_CCI_MSG_STA_REMOVE received from CPE */
 +static void wpapt_cci_dispatch_sta_remove(
 +		struct wpapt_cci_connection *clnt,
 +		struct wpapt_cci_msg_sta_remove *msg)
@@ -1206,7 +1423,7 @@ index 0000000..6ca1db7
 +		}
 +
 +	default:
-+		wpa_printf(MSG_ERROR, "WPAPT: Unknown CVNF message: id=%d, len=%d",
++		wpa_printf(MSG_ERROR, "WPAPT: Unknown message from CPE: id=%d, len=%d",
 +				msg_id, msg_len);
 +	}
 +}
@@ -1241,19 +1458,21 @@ index 0000000..6ca1db7
 +{
 +	struct wpapt_cci_connection* conn = ctx;
 +	struct hostapd_data *hapd = conn->hapd;
-+	wpa_printf(MSG_DEBUG, "WPAPT: on_disconnect, BSS=%s",
-+			hapd->conf->ssid.ssid);
 +
 +	dl_list_del(&conn->clnt_entry);
 +
-+	// Disassociate the BSS from TLS connection
-+	if (conn->hapd != NULL)
-+		conn->hapd->wpapt_cci = NULL;
-+
++	// Disassociate the BSS from TLS connection. 
++	if (hapd != NULL) {
++		wpa_printf(MSG_DEBUG, "WPAPT: on_disconnect, BSS=%s",
++				hapd->conf->ssid.ssid);
++		hapd->wpapt_cci = NULL;
++	}
++	else
++		wpa_printf(MSG_DEBUG, "WPAPT: on_disconnect, no BSS assiciated");
++	
 +	/* ToDo: Remove all stations from BSS */
 +
 +	os_free(conn);
-+	hapd->wpapt_cci = NULL;
 +}
 +
 +
@@ -1276,7 +1495,7 @@ index 0000000..6ca1db7
 +		return -1;
 +	}
 +
-+	/* Prepare CVNF client configuration */
++	/* Prepare CCI server configuration */
 +	struct wpapt_tls_srv_config cfg;
 +	memset(&cfg, 0, sizeof(cfg));
 +	cfg.bind_addr.s_addr = INADDR_ANY;
@@ -1329,7 +1548,7 @@ index 0000000..6ca1db7
 +void wpapt_cci_hapd_cleanup(struct hostapd_data *hapd)
 +{
 +	if (hapd->wpapt_cci != NULL) {
-+		/* If there is an alive connection to CVNF - close it */
++		/* If there is an alive connection to CPE - close it */
 +		if (hapd->wpapt_cci->clnt_ctx != NULL) {
 +			/* on_disconnect will get invoked, cleanup is done from there */
 +			wpapt_tls_disconnect_clnt (hapd->wpapt_cci->clnt_ctx);
@@ -1341,7 +1560,7 @@ index 0000000..6ca1db7
 +}
 diff --git a/src/ap/wpapt_cci_srv.h b/src/ap/wpapt_cci_srv.h
 new file mode 100644
-index 0000000..58590f0
+index 0000000..c601829
 --- /dev/null
 +++ b/src/ap/wpapt_cci_srv.h
 @@ -0,0 +1,55 @@
@@ -1376,8 +1595,8 @@ index 0000000..58590f0
 + *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
 + *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
 + *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-+ *  
-+ *  Interface between Control VNF server (CVNF) and CPE.
++ */
++/* Interface between Control VNF server (CVNF) and CPE.
 + */
 +
 +#ifndef WPAPT_CCI_H
@@ -1402,10 +1621,10 @@ index 0000000..58590f0
 +#endif /* WPAPT_CCI_H */
 diff --git a/src/common/wpapt_tls.c b/src/common/wpapt_tls.c
 new file mode 100644
-index 0000000..96c2a3b
+index 0000000..f11d74a
 --- /dev/null
 +++ b/src/common/wpapt_tls.c
-@@ -0,0 +1,696 @@
+@@ -0,0 +1,691 @@
 +/*
 + *   BSD LICENSE
 + * 
@@ -1437,8 +1656,10 @@ index 0000000..96c2a3b
 + *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
 + *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
 + *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-+ *  
-+ *             TLS connection used for WPA Pass Through function
++ */
++
++ /*
++ *               TLS connection used for WPA Pass Through function
 + * =============================================================================
 + */
 +
@@ -2029,14 +2250,7 @@ index 0000000..96c2a3b
 +	peer->write_msg_pos = 6; /* fix message length */
 +	wpapt_tls_put_u16 (peer, msg_len - sizeof(struct wpapt_tls_msg_header));
 +	peer->write_msg_pos = 0;
-+
-+	printf("MSG_LEN: %d\n", msg_len);
-+
-+	int retlen = SSL_write(peer->ssl, peer->write_buf, msg_len);
-+
-+	printf("SSL_write return: %d\n", retlen);
-+
-+	return (retlen == msg_len) ? 0 : -1;
++	return (SSL_write(peer->ssl, peer->write_buf, msg_len) == msg_len) ? 0 : -1;
 +}
 +
 +
@@ -2104,7 +2318,7 @@ index 0000000..96c2a3b
 +}
 diff --git a/src/common/wpapt_tls.h b/src/common/wpapt_tls.h
 new file mode 100644
-index 0000000..9e8edf0
+index 0000000..36e2750
 --- /dev/null
 +++ b/src/common/wpapt_tls.h
 @@ -0,0 +1,134 @@
@@ -2139,8 +2353,8 @@ index 0000000..9e8edf0
 + *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
 + *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
 + *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-+ *  
-+ *             TLS connection used for WPA Pass Through function
++ */
++/*              TLS connection used for WPA Pass Through function
 + * =============================================================================
 + */
 +
@@ -2243,10 +2457,41 @@ index 0000000..9e8edf0
 +
 +#endif /* WPA_PT_TLS_H */
 diff --git a/src/drivers/driver.h b/src/drivers/driver.h
-index a449cc9..7648eb2 100644
+index a449cc9..c5f342d 100644
 --- a/src/drivers/driver.h
 +++ b/src/drivers/driver.h
-@@ -4981,6 +4981,9 @@ extern const struct wpa_driver_ops wpa_driver_roboswitch_ops;
+@@ -2342,6 +2342,30 @@ struct wpa_driver_ops {
+ 			       size_t data_len, int encrypt,
+ 			       const u8 *own_addr, u32 flags);
+ 
++	/**
++	 * hapd_send_eapol_mic - Update RSC, calc mic and send an EAPOL packet
++	 *                       to DVNF (WPAPT case only)
++	 * @priv: private driver interface data
++	 * @addr: Destination MAC address
++	 * @frame_type: Combination of WPAPT_CDI_KEY_MGMT_... flags
++	 * @key: KCK key
++	 * @key_len: KCK key length
++	 * @key_info_type:
++	 * @akm:
++	 * @data: EAPOL packet starting with IEEE 802.1X header
++	 * @data_len: Length of the EAPOL packet in octets
++	 * @encrypt: Whether the frame should be encrypted
++	 * @own_addr: Source MAC address
++	 * @flags: WPA_STA_* flags for the destination station
++	 *
++	 * Returns: 0 on success, -1 on failure
++	 */
++	int (*hapd_send_eapol_mic)(void *priv, const u8 *addr,
++			u16 frame_type, const u8* key, size_t key_len,
++		    int key_info_type, int akm,
++			const u8 *data, size_t data_len, int encrypt,
++			const u8 *own_addr, u32 flags);
++
+ 	/**
+ 	 * sta_deauth - Deauthenticate a station (AP only)
+ 	 * @priv: Private driver interface data
+@@ -4981,6 +5005,9 @@ extern const struct wpa_driver_ops wpa_driver_roboswitch_ops;
  /* driver_atheros.c */
  extern const struct wpa_driver_ops wpa_driver_atheros_ops;
  #endif /* CONFIG_DRIVER_ATHEROS */
@@ -2258,10 +2503,10 @@ index a449cc9..7648eb2 100644
  #endif /* CONFIG_DRIVER_NONE */
 diff --git a/src/drivers/driver_wpapt_dvnf.c b/src/drivers/driver_wpapt_dvnf.c
 new file mode 100644
-index 0000000..fd1f3eb
+index 0000000..db8781f
 --- /dev/null
 +++ b/src/drivers/driver_wpapt_dvnf.c
-@@ -0,0 +1,596 @@
+@@ -0,0 +1,687 @@
 +/*
 + *   BSD LICENSE
 + * 
@@ -2293,7 +2538,8 @@ index 0000000..fd1f3eb
 + *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
 + *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
 + *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-+ *  
++ */
++/*
 + * Driver interface for RADIUS server or WPS ER only (no driver)
 + * Copyright (c) 2008, Atheros Communications
 + *
@@ -2462,7 +2708,8 @@ index 0000000..fd1f3eb
 +			int qos = le_to_host16(hdr->frame_control) &
 +					(WLAN_FC_STYPE_QOS_DATA << 4);
 +			int hdr_len = sizeof(struct ieee80211_hdr) +
-+					(qos ? sizeof(u16) : 0) + sizeof(rfc1042_header) + 2;
++					(qos ? sizeof(u16) : 0) + sizeof(rfc1042_header);
++			hdr_len += sizeof(u16); /* frame type, 0x888e */
 +			if (msg.frame_len > hdr_len) {
 +				drv_event_eapol_rx(bss->hapd, msg.sta_addr,
 +						wpapt_tls_get_read_ptr(drv->dvnf) + hdr_len,
@@ -2538,12 +2785,12 @@ index 0000000..fd1f3eb
 +}
 +
 +
++/* Called for the first BSS listed in the configuration file */
 +static void * wpapt_vnf_driver_hapd_init(struct hostapd_data *hapd,
 +				    struct wpa_init_params *params)
 +{
 +	struct wpapt_vnf_bss_data *bss;
 +	struct wpapt_vnf_drv_data *drv = params->global_priv;
-+	int    first_bss;
 +
 +	bss = os_zalloc(sizeof(struct wpapt_vnf_bss_data));
 +	if (bss == NULL) {
@@ -2554,106 +2801,103 @@ index 0000000..fd1f3eb
 +
 +	bss->hapd = hapd;
 +	bss->global = drv;
-+	first_bss = dl_list_empty(&bss->global->bss_list);
 +	dl_list_add(&drv->bss_list, &bss->bss_list);
 +	memcpy(bss->bssid, params->bssid, ETH_ALEN);
 +	memcpy(params->own_addr, params->bssid, ETH_ALEN);
 +
 +	/* Parse driver params and start a server for DVNF clients */
-+	if (first_bss) {
-+		const char* s = params->driver_params;
-+		const char* token_start;
-+		char* tmp_string;
-+		int token_len;
-+		struct wpapt_tls_srv_config srv_config;
-+		int bad_drv_params = 0;
++	const char* s = params->driver_params;
++	const char* token_start;
++	char* tmp_string;
++	int token_len;
++	struct wpapt_tls_srv_config srv_config;
++	int bad_drv_params = 0;
 +
-+		/* Read an IP address to bind the server socket to */
-+		memset(&srv_config, 0, sizeof(srv_config));
-+		read_token(&s, &token_start, &token_len, ":");
-+		if (*s != ':')
++	/* Read an IP address to bind the server socket to */
++	memset(&srv_config, 0, sizeof(srv_config));
++	read_token(&s, &token_start, &token_len, ":");
++	if (*s != ':')
++		bad_drv_params = 1;
++	else {
++		s++; /* Go past ':' */
++		tmp_string = os_zalloc(token_len+1);
++		if (tmp_string == NULL)
 +			bad_drv_params = 1;
 +		else {
-+			s++; /* Go past ':' */
-+			tmp_string = os_zalloc(token_len+1);
-+			if (tmp_string == NULL)
++			memcpy(tmp_string, token_start, token_len);
++			if (inet_aton(tmp_string, &srv_config.bind_addr) == 0)
 +				bad_drv_params = 1;
-+			else {
-+				memcpy(tmp_string, token_start, token_len);
-+				if (inet_aton(tmp_string, &srv_config.bind_addr) == 0)
-+					bad_drv_params = 1;
-+				os_free(tmp_string);
-+			}
++			os_free(tmp_string);
 +		}
-+
-+		/* Read server port number */
-+		if (!bad_drv_params) {
-+			char *endptr;
-+
-+			read_token(&s, &token_start, &token_len, ",");
-+			if (*s == ',') {
-+				s++; /* Go past ',' */
-+				long port = strtol(token_start, &endptr, 10);
-+				if (endptr != token_start + token_len ||
-+						port < 1 || port > 0xFFFF)
-+					bad_drv_params = 1;
-+				else
-+					srv_config.port = (uint16_t)port;
-+			}
-+			else
-+				bad_drv_params = 1;
-+		}
-+
-+		/* Read root certificate filename */
-+		if (!bad_drv_params) {
-+			srv_config.root_crt_file = read_item_in_quotes(&s);
-+			if (srv_config.root_crt_file != NULL && *s == ',')
-+				s++; /* Go past ',' */
-+			else
-+				bad_drv_params = 1;
-+		}
-+
-+		/* Read own certificate filename */
-+		if (!bad_drv_params) {
-+			srv_config.srv_crt_file = read_item_in_quotes(&s);
-+			if (srv_config.srv_crt_file != NULL && *s == ',')
-+				s++; /* Go past ',' */
-+			else
-+				bad_drv_params = 1;
-+		}
-+
-+		/* Read own private key filename */
-+		if (!bad_drv_params) {
-+			srv_config.srv_key_file = read_item_in_quotes(&s);
-+			if (srv_config.srv_key_file == NULL)
-+				bad_drv_params = 1;
-+		}
-+
-+		/* Read private key password (optional) */
-+		if (!bad_drv_params && *s == ',') {
-+			s++;
-+			srv_config.srv_key_password = read_item_in_quotes(&s);
-+			bad_drv_params = srv_config.srv_key_password == NULL;
-+		}
-+
-+		if (bad_drv_params) {
-+			wpa_printf(MSG_ERROR, "WPAPT: Cannot parse driver parameters \"%s\"",
-+					params->driver_params);
-+		}
-+		else {
-+			/* Start the server so that DVNF can connect to us */
-+			srv_config.msg_hdr_magic = WPAPT_CDI_MAGIC;
-+			srv_config.on_msg_cb = wpapt_vnf_dispatch_msg;
-+			srv_config.on_new_clnt_cb = wpapt_vnf_on_new_clnt;
-+			srv_config.on_disconnect_cb = wpapt_vnf_on_clnt_disconnect;
-+			drv->cvnf_srv = wpapt_tls_start_listening(&srv_config, drv);
-+		}
-+
-+		os_free(srv_config.root_crt_file);
-+		os_free(srv_config.srv_crt_file);
-+		os_free(srv_config.srv_key_file);
-+		os_free(srv_config.srv_key_password);
 +	}
++
++	/* Read server port number */
++	if (!bad_drv_params) {
++		char *endptr;
++
++		read_token(&s, &token_start, &token_len, ",");
++		if (*s == ',') {
++			s++; /* Go past ',' */
++			long port = strtol(token_start, &endptr, 10);
++			if (endptr != token_start + token_len ||
++					port < 1 || port > 0xFFFF)
++				bad_drv_params = 1;
++			else
++				srv_config.port = (uint16_t)port;
++		}
++		else
++			bad_drv_params = 1;
++	}
++
++	/* Read root certificate filename */
++	if (!bad_drv_params) {
++		srv_config.root_crt_file = read_item_in_quotes(&s);
++		if (srv_config.root_crt_file != NULL && *s == ',')
++			s++; /* Go past ',' */
++		else
++			bad_drv_params = 1;
++	}
++
++	/* Read own certificate filename */
++	if (!bad_drv_params) {
++		srv_config.srv_crt_file = read_item_in_quotes(&s);
++		if (srv_config.srv_crt_file != NULL && *s == ',')
++			s++; /* Go past ',' */
++		else
++			bad_drv_params = 1;
++	}
++
++	/* Read own private key filename */
++	if (!bad_drv_params) {
++		srv_config.srv_key_file = read_item_in_quotes(&s);
++		if (srv_config.srv_key_file == NULL)
++			bad_drv_params = 1;
++	}
++
++	/* Read private key password (optional) */
++	if (!bad_drv_params && *s == ',') {
++		s++;
++		srv_config.srv_key_password = read_item_in_quotes(&s);
++		bad_drv_params = srv_config.srv_key_password == NULL;
++	}
++
++	if (bad_drv_params) {
++		wpa_printf(MSG_ERROR, "WPAPT: Cannot parse driver parameters \"%s\"",
++				params->driver_params);
++	}
++	else {
++		/* Start the server so that DVNF can connect to us */
++		srv_config.msg_hdr_magic = WPAPT_CDI_MAGIC;
++		srv_config.on_msg_cb = wpapt_vnf_dispatch_msg;
++		srv_config.on_new_clnt_cb = wpapt_vnf_on_new_clnt;
++		srv_config.on_disconnect_cb = wpapt_vnf_on_clnt_disconnect;
++		drv->cvnf_srv = wpapt_tls_start_listening(&srv_config, drv);
++	}
++
++	os_free(srv_config.root_crt_file);
++	os_free(srv_config.srv_crt_file);
++	os_free(srv_config.srv_key_file);
++	os_free(srv_config.srv_key_password);
 +
 +	if (bss->global->cvnf_srv == NULL) {
 +		dl_list_del(&bss->bss_list);
@@ -2662,6 +2906,33 @@ index 0000000..fd1f3eb
 +	}
 +
 +	return bss;
++}
++
++
++/* Called for the 2nd and further BSS:es listed in the configuration file */
++static int wpapt_vnf_driver_if_add (void *priv, enum wpa_driver_if_type type,
++	      const char *ifname, const u8 *addr, void *bss_ctx,
++	      void **drv_priv, char *force_ifname, u8 *if_addr,
++	      const char *bridge, int use_existing, int setup_ap)
++{
++	struct wpapt_vnf_bss_data *bss;
++	struct wpapt_vnf_bss_data *first_bss = priv;
++	struct wpapt_vnf_drv_data *drv = first_bss->global;
++
++	bss = os_zalloc(sizeof(struct wpapt_vnf_bss_data));
++	if (bss == NULL) {
++		wpa_printf(MSG_ERROR, "Could not allocate memory for "
++			   "WPAPT VNF BSS data");
++		return -1;
++	}
++
++	bss->hapd = bss_ctx;
++	bss->global = drv;
++	dl_list_add(&drv->bss_list, &bss->bss_list);
++	memcpy(bss->bssid, addr, ETH_ALEN);
++
++	*drv_priv = bss;
++	return 0;
 +}
 +
 +
@@ -2699,29 +2970,25 @@ index 0000000..fd1f3eb
 +}
 +
 +
-+static int wpapt_vnf_driver_hapd_send_eapol(void *priv, const u8 *addr,
-+		const u8 *data, size_t data_len, int encrypt, const u8 *own_addr,
-+		u32 flags)
++/* Calculate IEEE 802.11 header length (number of bytes that
++ * wpapt_vnf_driver_add_80211_header would write to the message) */
++static u16 wpapt_vnf_driver_get_80211_header_len(u32 flags)
 +{
-+	struct wpapt_vnf_bss_data *bss = priv;
-+	struct wpapt_vnf_drv_data *drv = bss->global;
-+	struct ieee80211_hdr hdr;
-+	int res;
 +	int qos = flags & WPA_STA_WMM;
-+	struct wpapt_cdi_msg_frame msg;
++	return sizeof(struct ieee80211_hdr) + (qos ? 2 : 0) +
++			sizeof(rfc1042_header) + sizeof(uint16_t);
++}
 +
-+	if (drv->dvnf == NULL)
-+		return -1; /* DVNF peer not connected */
 +
-+	wpapt_tls_init_msg(drv->dvnf, WPAPT_CDI_MSG_FRAME);
-+	memset(&msg, 0, sizeof(msg));
-+	memcpy(msg.bssid, bss->bssid, ETH_ALEN);
-+	memcpy(msg.sta_addr, addr, ETH_ALEN);
-+	msg.frame_len = sizeof(hdr) + (qos ? 2 : 0) + sizeof(rfc1042_header) +
-+			sizeof(uint16_t) + data_len;
-+	wpapt_tls_put_data(drv->dvnf, &msg, sizeof(msg));
++/* Put IEEE 802.11 header to an outgoing message.
++ * Returns number of bytes written to message. */
++static void wpapt_vnf_driver_add_80211_header(struct wpapt_tls_peer *dvnf,
++		const u8 *addr, int encrypt, const u8 *own_addr, u32 flags,
++		u16 contents_type)
++{
++	struct ieee80211_hdr hdr;
++	int qos = flags & WPA_STA_WMM;
 +
-+	/* Put IEEE 802.11 header to the message */
 +	memset(&hdr, 0, sizeof(hdr));
 +	hdr.frame_control =
 +		IEEE80211_FC(WLAN_FC_TYPE_DATA, WLAN_FC_STYPE_DATA);
@@ -2735,20 +3002,45 @@ index 0000000..fd1f3eb
 +	memcpy(hdr.IEEE80211_DA_FROMDS, addr, ETH_ALEN);
 +	memcpy(hdr.IEEE80211_BSSID_FROMDS, own_addr, ETH_ALEN);
 +	memcpy(hdr.IEEE80211_SA_FROMDS, own_addr, ETH_ALEN);
-+	wpapt_tls_put_data(drv->dvnf, &hdr, sizeof(hdr));
++	wpapt_tls_put_data(dvnf, &hdr, sizeof(hdr));
 +
 +	/* Put QoS header to the message */
 +	if (qos) {
 +		/* Set highest priority in QoS header */
-+		wpapt_tls_put_u8(drv->dvnf, 7);
-+		wpapt_tls_put_u8(drv->dvnf, 0);
++		wpapt_tls_put_u8(dvnf, 7);
++		wpapt_tls_put_u8(dvnf, 0);
 +	}
 +
 +	/* Logical-Link Control: DSAP, SSAP, Control field, Organization Code */
-+	wpapt_tls_put_data(drv->dvnf, rfc1042_header, sizeof(rfc1042_header));
++	wpapt_tls_put_data(dvnf, rfc1042_header, sizeof(rfc1042_header));
 +
-+	/* Contents Type: 802.1X Authentication (0x888e) in big endian */
-+	wpapt_tls_put_u16(drv->dvnf, host_to_be16(ETH_P_PAE));
++	/* Contents Type in big endian, e.g. 802.1X Authentication (0x888e) */
++	wpapt_tls_put_u16(dvnf, host_to_be16(contents_type));
++}
++
++
++static int wpapt_vnf_driver_hapd_send_eapol(void *priv, const u8 *addr,
++		const u8 *data, size_t data_len, int encrypt, const u8 *own_addr,
++		u32 flags)
++{
++	struct wpapt_vnf_bss_data *bss = priv;
++	struct wpapt_vnf_drv_data *drv = bss->global;
++	int res;
++	struct wpapt_cdi_msg_frame msg;
++
++	if (drv->dvnf == NULL)
++		return -1; /* DVNF peer not connected */
++
++	wpapt_tls_init_msg(drv->dvnf, WPAPT_CDI_MSG_FRAME);
++	memset(&msg, 0, sizeof(msg));
++	memcpy(msg.bssid, bss->bssid, ETH_ALEN);
++	memcpy(msg.sta_addr, addr, ETH_ALEN);
++	msg.frame_len = host_to_le16(wpapt_vnf_driver_get_80211_header_len(flags) +
++			data_len);
++	wpapt_tls_put_data(drv->dvnf, &msg, sizeof(msg));
++
++	wpapt_vnf_driver_add_80211_header(drv->dvnf, addr, encrypt, own_addr,
++			flags, ETH_P_PAE);
 +
 +	/* EAPOL message contents */
 +	wpapt_tls_put_data(drv->dvnf, data, data_len);
@@ -2758,6 +3050,48 @@ index 0000000..fd1f3eb
 +	if (res != 0)
 +		wpa_printf(MSG_INFO, "driver_wpapt: Failed to send DVNF_MSG_FRAME, "
 +				"DVNF disconnected.");
++
++	return res;
++}
++
++
++static int wpapt_vnf_driver_hapd_send_eapol_mic(void *priv, const u8 *addr,
++		u16 frame_type, const u8* key, size_t key_len, int key_info_type,
++		int akm, const u8 *data, size_t data_len, int encrypt,
++		const u8 *own_addr, u32 flags)
++{
++	struct wpapt_vnf_bss_data *bss = priv;
++	struct wpapt_vnf_drv_data *drv = bss->global;
++	int res;
++	struct wpapt_cdi_msg_eapol_mic msg;
++
++	if (drv->dvnf == NULL)
++		return -1; /* DVNF peer not connected */
++
++	wpapt_tls_init_msg(drv->dvnf, WPAPT_CDI_MSG_EAPOL_MIC);
++	memset(&msg, 0, sizeof(msg));
++	memcpy(msg.bssid, bss->bssid, ETH_ALEN);
++	memcpy(msg.sta_addr, addr, ETH_ALEN);
++	msg.frame_type = host_to_le16(frame_type);
++	memcpy(msg.key, key, WPAPT_KCK_MAX_LEN);
++	msg.key_len = key_len;
++	msg.key_info_type = key_info_type;
++	msg.akm = (u8) akm;
++	msg.frame_len = host_to_le16(wpapt_vnf_driver_get_80211_header_len(flags) +
++			data_len);
++	wpapt_tls_put_data(drv->dvnf, &msg, sizeof(msg));
++
++	wpapt_vnf_driver_add_80211_header(drv->dvnf, addr, encrypt, own_addr,
++			flags, ETH_P_PAE);
++
++	/* EAPOL message contents */
++	wpapt_tls_put_data(drv->dvnf, data, data_len);
++
++	res = wpapt_tls_send_msg(drv->dvnf);
++
++	if (res != 0)
++		wpa_printf(MSG_INFO, "driver_wpapt: Failed to send "
++				"WPAPT_CDI_MSG_EAPOL_MIC, DVNF disconnected.");
 +
 +	return res;
 +}
@@ -2848,11 +3182,13 @@ index 0000000..fd1f3eb
 +	.name = "wpapt_vnf",
 +	.desc = "WPA Pass Through VNF driver",
 +	.global_init = wpapt_vnf_driver_global_init,
-+	.hapd_init = wpapt_vnf_driver_hapd_init,
++	.hapd_init = wpapt_vnf_driver_hapd_init, /* 1st BSS */
++	.if_add = wpapt_vnf_driver_if_add,       /* Further BSSes */
 +	.get_country = wpapt_vnf_driver_get_country,
 +	.hapd_set_ssid = wpapt_vnf_driver_hapd_set_ssid,
 +	.sta_add = wpapt_vnf_driver_sta_add,
 +	.hapd_send_eapol = wpapt_vnf_driver_hapd_send_eapol,
++	.hapd_send_eapol_mic = wpapt_vnf_driver_hapd_send_eapol_mic,
 +	.sta_remove = wpapt_vnf_driver_sta_remove,
 +	.set_key = wpapt_vnf_driver_set_key,
 +	.hapd_deinit = wpapt_vnf_driver_hapd_deinit,
@@ -2906,10 +3242,10 @@ index c6fe4c2..9f27440 100644
  DRV_OBJS += src/drivers/driver_none.c
 diff --git a/src/drivers/wpapt_cdi.h b/src/drivers/wpapt_cdi.h
 new file mode 100644
-index 0000000..4805349
+index 0000000..84322a1
 --- /dev/null
 +++ b/src/drivers/wpapt_cdi.h
-@@ -0,0 +1,292 @@
+@@ -0,0 +1,291 @@
 +/*
 + *   BSD LICENSE
 + * 
@@ -2941,7 +3277,6 @@ index 0000000..4805349
 + *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
 + *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
 + *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-+ *  
 + */
 +/* Interface between Control VNF server (CVNF) and Data VNF server (DVNF).
 + * This header defives the messages sent between these entities.
